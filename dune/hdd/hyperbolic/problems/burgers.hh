@@ -35,7 +35,6 @@ namespace Problems {
 
 template< class E, class D, int d, class R, int r = 1 >
 class Burgers
-  : public ProblemInterface< E, D, d, R, r >
 {
   Burgers() { static_assert(AlwaysFalse< E >::value, "Not available for these dimensions!"); }
 };
@@ -43,32 +42,44 @@ class Burgers
 
 template< class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp >
 class Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
-  : public ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
+//  : public ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
 {
   typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > BaseType;
   typedef Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ThisType;
 
-  typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > ExpressionFunctionType;
-  typedef typename Dune::Stuff::Functions::Constant
-                < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, 1, 1 > ConstantFunctionType;
-  typedef typename Dune::Stuff::Functions::Constant
-                < EntityImp, DomainFieldImp, 1, RangeFieldImp, 1, 1 > Constant1dFunctionType;
-
 public:
-  typedef typename BaseType::FluxType          FluxType;
-  typedef typename BaseType::SourceType        SourceType;
-  typedef typename BaseType::FunctionType      FunctionType;
-  typedef typename BaseType::ConfigType        ConfigType;
-  typedef typename BaseType::BoundaryInfoType  BoundaryInfoType;
-  typedef typename BaseType::BoundaryValueType BoundaryValueType;
+  typedef typename Dune::Stuff::Functions::Expression
+                < EntityImp, RangeFieldImp, 1, RangeFieldImp, domainDim > ExpressionFunctionType;
+  typedef typename Dune::Stuff::Functions::Expression
+                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > FunctionType;
+  typedef typename Dune::Stuff::Functions::Expression
+                < EntityImp, DomainFieldImp, 1, RangeFieldImp, 1, 1 > Expression1dFunctionType;
+
+
+//  typedef ExpressionFunctionType               FluxType;
+//  typedef typename BaseType::SourceType        SourceType;
+//  typedef typename BaseType::FunctionType      FunctionType;
+//  typedef typename BaseType::ConfigType        ConfigType;
+//  typedef typename BaseType::RangeFieldType    RangeFieldType;
+
+    typedef ExpressionFunctionType               FluxType;
+    typedef Expression1dFunctionType             SourceType;
+    typedef Dune::Stuff::Common::Configuration   ConfigType;
+    typedef typename FunctionType::DomainType    DomainType;
+    typedef RangeFieldImp                        RangeFieldType;
 
   static std::string static_id()
   {
     return BaseType::static_id() + ".burgers";
   }
 
-  virtual std::string type() const override
+//  virtual std::string type() const override
+//  {
+//    return BaseType::type() + ".burgers";
+//  }
+
+
+  std::string type() const
   {
     return BaseType::type() + ".burgers";
   }
@@ -82,6 +93,7 @@ public:
     grid_config["type"] = "provider.cube";
     grid_config["ll"] = "[0, 0]";
     grid_config["ur"] = "[1, 1]";
+    grid_config["num_elements"] = "[8 8 8 8]";
     config.add(grid_config, "grid");
     Stuff::Common::Configuration boundary_config;
     boundary_config["name"] = "boundary_info";
@@ -111,72 +123,102 @@ public:
     }
   } // ... default_config(...)
 
-  static std::unique_ptr< ThisType > create(const Stuff::Common::Configuration config = default_config(),
-                                            const std::string sub_name = static_id())
-  {
-    const Stuff::Common::Configuration cfg = config.has_sub(sub_name) ? config.sub(sub_name) : config;
-    std::shared_ptr< CheckerboardFunctionType >
-        checkerboard_function(CheckerboardFunctionType::create(cfg.sub("diffusion_factor")));
-    return Stuff::Common::make_unique< ThisType >(checkerboard_function,
-                                                  BaseType::create_matrix_function("diffusion_tensor", cfg),
-                                                  BaseType::create_vector_function("force", cfg),
-                                                  BaseType::create_vector_function("dirichlet", cfg),
-                                                  BaseType::create_vector_function("neumann", cfg));
-  } // ... create(...)
+//  static std::unique_ptr< ThisType > create(const Stuff::Common::Configuration config = default_config(),
+//                                            const std::string sub_name = static_id())
+//  {
+//    const Stuff::Common::Configuration cfg = config.has_sub(sub_name) ? config.sub(sub_name) : config;
+//    std::shared_ptr< CheckerboardFunctionType >
+//        checkerboard_function(CheckerboardFunctionType::create(cfg.sub("diffusion_factor")));
+//    return Stuff::Common::make_unique< ThisType >(checkerboard_function,
+//                                                  BaseType::create_matrix_function("diffusion_tensor", cfg),
+//                                                  BaseType::create_vector_function("force", cfg),
+//                                                  BaseType::create_vector_function("dirichlet", cfg),
+//                                                  BaseType::create_vector_function("neumann", cfg));
+//  } // ... create(...)
 
-  Burgers(const std::shared_ptr< const ConfigType > grid_config,
-          const std::shared_ptr< const FluxType > flux = std::make_shared< ExpressionFunctionType >("u", "u^2/2", 2),
-          const std::shared_ptr< const SourceType > source = std::make_shared< Constant1dFunctionType >(RangeType(0)),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< ConstantFunctionType >(RangeFieldImp(0)),
+  Burgers(const std::shared_ptr< const ConfigType > grid_config = std::make_shared< ConfigType >(default_config()),
+          const std::shared_ptr< const FluxType > flux = std::make_shared< ExpressionFunctionType >("x", "x[0]", 1),
+          const std::shared_ptr< const SourceType > source = std::make_shared< Expression1dFunctionType >("x", "0", 0),
+          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< FunctionType >("x", "x[0]", 10),
           const std::shared_ptr< const ConfigType > boundary_info = std::make_shared< ConfigType >("type", "dirichlet"),
-          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< ConstantFunctionType >(RangeFieldImp(0)))
+          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< FunctionType >("x", "0", 0))
     : grid_config_(grid_config)
     , flux_(flux)
     , source_(source)
     , initial_values_(initial_values)
     , boundary_info_(boundary_info)
-    , boundary_values (boundary_values)
+    , boundary_values_(boundary_values)
   {}
 
-  virtual const std::shared_ptr< const FluxType >& flux() const override
+//  virtual const std::shared_ptr< const FluxType >& flux() const override
+//  {
+//    return flux_;
+//  }
+
+//  virtual const std::shared_ptr< const SourceType >& source() const override
+//  {
+//    return source_;
+//  }
+
+//  virtual const std::shared_ptr< const FunctionType >& initial_values() const override
+//  {
+//    return initial_values_;
+//  }
+
+//  virtual const std::shared_ptr< const ConfigType >& grid_config() const override
+//  {
+//    return grid_config_;
+//  }
+
+//  virtual const std::shared_ptr< const ConfigType >& boundary_info() const override
+//  {
+//    return boundary_info_;
+//  }
+
+//  virtual const std::shared_ptr< const FunctionType >& boundary_values() const override
+//  {
+//    return boundary_values_;
+//  }
+
+
+  const std::shared_ptr< const FluxType >& flux() const
   {
     return flux_;
   }
 
-  virtual const std::shared_ptr< const SourceType >& source() const override
+  const std::shared_ptr< const SourceType >& source() const
   {
     return source_;
   }
 
-  virtual const std::shared_ptr< const FunctionType >& initial_values() const override
+  const std::shared_ptr< const FunctionType >& initial_values() const
   {
     return initial_values_;
   }
 
-  virtual const std::shared_ptr< const ConfigType >& grid_cfg() const override
+  const std::shared_ptr< const ConfigType >& grid_config() const
   {
     return grid_config_;
   }
 
-  virtual const std::shared_ptr< const ConfigType >& boundary_info() const override
+  const std::shared_ptr< const ConfigType >& boundary_info() const
   {
     return boundary_info_;
   }
 
-  virtual const std::shared_ptr< const FunctionType >& boundary_values() const override
+  const std::shared_ptr< const FunctionType >& boundary_values() const
   {
     return boundary_values_;
   }
 
 private:
+  const std::shared_ptr< const ConfigType >   grid_config_;
   const std::shared_ptr< const FluxType >     flux_;
   const std::shared_ptr< const SourceType >   source_;
-  const std::shared_ptr< const ConfigType >   grid_config_;
+  const std::shared_ptr< const FunctionType > initial_values_;
   const std::shared_ptr< const ConfigType >   boundary_info_;
   const std::shared_ptr< const FunctionType > boundary_values_;
-  const std::shared_ptr< const FunctionType > initial_values_;
 };
-
 
 } // namespace Problems
 } // namespace Hyperbolic

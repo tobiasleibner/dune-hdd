@@ -10,6 +10,7 @@
 
 #include <dune/stuff/common/configuration.hh>
 #include <dune/stuff/functions/default.hh>
+#include <dune/stuff/functions/expression.hh>
 
 namespace Dune {
 namespace HDD {
@@ -36,7 +37,7 @@ public:
   typedef RangeFieldImp     RangeFieldType;
 
   typedef Dune::Stuff::LocalizableFunctionInterface
-      < EntityType, DomainFieldType, 1, RangeFieldType, dimDomain >  FluxType;
+      < EntityType, RangeFieldType, 1, RangeFieldType, dimDomain >   FluxType;
   typedef Dune::Stuff::LocalizableFunctionInterface
       < EntityType, DomainFieldType, 1, RangeFieldType, 1 >          SourceType;
   typedef Dune::Stuff::LocalizableFunctionInterface
@@ -60,7 +61,7 @@ public:
 
   virtual const std::shared_ptr< const FunctionType >& initial_values() const = 0;
 
-  virtual const std::shared_ptr< const ConfigType >& grid_cfg() const = 0;
+  virtual const std::shared_ptr< const ConfigType >& grid_config() const = 0;
 
   virtual const std::shared_ptr< const ConfigType >& boundary_info() const = 0;
 
