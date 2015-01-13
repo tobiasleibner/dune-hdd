@@ -9,6 +9,7 @@
 #include <ostream>
 
 #include <dune/stuff/common/configuration.hh>
+#include <dune/stuff/common/exceptions.hh>
 #include <dune/stuff/functions/default.hh>
 #include <dune/stuff/functions/expression.hh>
 
@@ -20,7 +21,11 @@ namespace Hyperbolic {
 template < class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp, int rangeDim >
 class ProblemInterface
 {
-  // TODO: implement
+public:
+  ProblemInterface()
+  {
+    DUNE_THROW(Dune::NotImplemented, "Not implemented for rangeDim != 1");
+  }
 };
 
 
@@ -35,15 +40,17 @@ public:
   typedef DomainFieldImp    DomainFieldType;
   static const unsigned int dimDomain = domainDim;
   typedef RangeFieldImp     RangeFieldType;
+  static const unsigned int dimRange = 1;
 
+  typedef Dune::Stuff::GlobalFunctionInterface< EntityType, RangeFieldType, dimRange, RangeFieldType, dimDomain > FluxType;
+  typedef Dune::Stuff::GlobalFunctionInterface< EntityType, RangeFieldType, dimRange, RangeFieldType, 1 >         SourceType; // depends on u
+//  typedef Dune::Stuff::LocalizableFunctionInterface
+//      < EntityType, DomainFieldType, 1, RangeFieldType, 1 >          SourceType; // depends on x
   typedef Dune::Stuff::LocalizableFunctionInterface
-      < EntityType, RangeFieldType, 1, RangeFieldType, dimDomain >   FluxType;
-  typedef Dune::Stuff::LocalizableFunctionInterface
-      < EntityType, DomainFieldType, 1, RangeFieldType, 1 >          SourceType;
-  typedef Dune::Stuff::LocalizableFunctionInterface
-      < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1 >  FunctionType;
-  typedef Dune::Stuff::Common::Configuration                         ConfigType;
-  typedef typename FunctionType::DomainType                          DomainType;
+      < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >  FunctionType;
+  typedef Dune::Stuff::Common::Configuration                                ConfigType;
+
+  virtual ~ProblemInterface() {}
 
   static std::string static_id()
   {
@@ -61,9 +68,9 @@ public:
 
   virtual const std::shared_ptr< const FunctionType >& initial_values() const = 0;
 
-  virtual const std::shared_ptr< const ConfigType >& grid_config() const = 0;
+  virtual const ConfigType grid_config() const = 0;
 
-  virtual const std::shared_ptr< const ConfigType >& boundary_info() const = 0;
+  virtual const ConfigType boundary_info() const = 0;
 
   virtual const std::shared_ptr< const FunctionType >& boundary_values() const = 0;
 

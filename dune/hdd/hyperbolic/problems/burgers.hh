@@ -33,6 +33,8 @@ namespace Hyperbolic {
 namespace Problems {
 
 
+// Default -> default.hh
+
 template< class E, class D, int d, class R, int r = 1 >
 class Burgers
 {
@@ -42,31 +44,26 @@ class Burgers
 
 template< class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp >
 class Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
-//  : public ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
+  : public ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
 {
   typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > BaseType;
   typedef Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ThisType;
 
 public:
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, RangeFieldImp, 1, RangeFieldImp, domainDim > ExpressionFunctionType;
+                < EntityImp, RangeFieldImp, 1, RangeFieldImp, domainDim > DefaultFluxType;
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > FunctionType;
+                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > DefaultFunctionType;
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, 1, RangeFieldImp, 1, 1 > Expression1dFunctionType;
+                < EntityImp, DomainFieldImp, 1, RangeFieldImp, 1, 1 > DefaultSourceType;
 
+  typedef typename BaseType::FluxType          FluxType;
+  typedef typename BaseType::SourceType        SourceType;
+  typedef typename BaseType::FunctionType      FunctionType;
+  typedef typename BaseType::ConfigType        ConfigType;
+  typedef typename BaseType::RangeFieldType    RangeFieldType;
 
-//  typedef ExpressionFunctionType               FluxType;
-//  typedef typename BaseType::SourceType        SourceType;
-//  typedef typename BaseType::FunctionType      FunctionType;
-//  typedef typename BaseType::ConfigType        ConfigType;
-//  typedef typename BaseType::RangeFieldType    RangeFieldType;
-
-    typedef ExpressionFunctionType               FluxType;
-    typedef Expression1dFunctionType             SourceType;
-    typedef Dune::Stuff::Common::Configuration   ConfigType;
-    typedef typename FunctionType::DomainType    DomainType;
-    typedef RangeFieldImp                        RangeFieldType;
+//  typedef typename DefaultFunctionType::DomainType    DomainType;
 
   static std::string static_id()
   {
@@ -84,139 +81,128 @@ public:
     return BaseType::type() + ".burgers";
   }
 
-  static Stuff::Common::Configuration default_config(const std::string sub_name = "")
+private:
+
+  static ConfigType default_grid_config()
   {
-    typedef Stuff::Functions::Constant< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ConstantFunctionType;
-    Stuff::Common::Configuration config;
-    Stuff::Common::Configuration grid_config;
-    grid_config["name"] = "grid";
+    ConfigType grid_config;
     grid_config["type"] = "provider.cube";
     grid_config["ll"] = "[0, 0]";
     grid_config["ur"] = "[1, 1]";
-    grid_config["num_elements"] = "[8 8 8 8]";
-    config.add(grid_config, "grid");
-    Stuff::Common::Configuration boundary_config;
-    boundary_config["name"] = "boundary_info";
+    grid_config["num_elements"] = "[100 8 8 8]";
+    return grid_config;
+  }
+
+  static ConfigType default_boundary_info_config()
+  {
+    ConfigType boundary_config;
     boundary_config["type"] = "dirichlet";
-    config.add(boundary_config, "boundary_info");
-    Stuff::Common::Configuration flux_config = FluxType::default_config();
-    flux_config["name"] = "flux";
+    return boundary_config;
+  }
+
+public:
+  static ConfigType default_config(const std::string sub_name = "")
+  {
+    ConfigType config;
+    config.add(default_grid_config(), "grid");
+    config.add(default_boundary_info_config(), "boundary_info");
+    ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = FluxType::static_id();
+    flux_config["variable"] = "u";
+    flux_config["expression"] = "1.0/2.0*u[0]*u[0]";
+    flux_config["order"] = "2";
     config.add(flux_config, "flux");
-    Stuff::Common::Configuration source_config = SourceType::default_config();
-    source_config["name"] = "source";
+    ConfigType source_config = DefaultSourceType::default_config();
     source_config["type"] = SourceType::static_id();
+    source_config["variable"] = "u";
+    source_config["expression"] = "0";
+    source_config["order"] = "0";
     config.add(source_config, "source");
-    Stuff::Common::Configuration constant_config = ConstantFunctionType::default_config();
-    constant_config["type"] = ConstantFunctionType::static_id();
-    constant_config["name"] = "initial_values";
-    constant_config["value"] = "0";
-    config.add(constant_config, "initial_values");
-    constant_config["name"] = "boundary_values";
-    config.add(constant_config, "boundary_values");
+    ConfigType initial_value_config = DefaultFunctionType::default_config();
+    initial_value_config["type"] = DefaultFunctionType::static_id();
+    initial_value_config["variable"] = "x";
+    initial_value_config["expression"] = "sin(pi*x[0])";
+    initial_value_config["order"] = "1";
+    config.add(initial_value_config, "initial_values");
+    ConfigType boundary_value_config = DefaultFunctionType::default_config();
+    boundary_value_config["type"] = DefaultFunctionType::static_id();
+    boundary_value_config["variable"] = "x";
+    boundary_value_config["expression"] = "x[0]";
+    boundary_value_config["order"] = "1";
+    config.add(boundary_value_config, "boundary_values");
     if (sub_name.empty())
       return config;
     else {
-      Stuff::Common::Configuration tmp;
+      ConfigType tmp;
       tmp.add(config, sub_name);
       return tmp;
     }
   } // ... default_config(...)
 
-//  static std::unique_ptr< ThisType > create(const Stuff::Common::Configuration config = default_config(),
-//                                            const std::string sub_name = static_id())
-//  {
-//    const Stuff::Common::Configuration cfg = config.has_sub(sub_name) ? config.sub(sub_name) : config;
-//    std::shared_ptr< CheckerboardFunctionType >
-//        checkerboard_function(CheckerboardFunctionType::create(cfg.sub("diffusion_factor")));
-//    return Stuff::Common::make_unique< ThisType >(checkerboard_function,
-//                                                  BaseType::create_matrix_function("diffusion_tensor", cfg),
-//                                                  BaseType::create_vector_function("force", cfg),
-//                                                  BaseType::create_vector_function("dirichlet", cfg),
-//                                                  BaseType::create_vector_function("neumann", cfg));
-//  } // ... create(...)
+  static std::unique_ptr< ThisType > create(const ConfigType cfg = default_config(),
+                                            const std::string sub_name = static_id())
+  {
+    const ConfigType config = cfg.has_sub(sub_name) ? cfg.sub(sub_name) : cfg;
+    const std::shared_ptr< const DefaultFluxType > flux(DefaultFluxType::create(config.sub("flux")));
+    const std::shared_ptr< const DefaultSourceType > source(DefaultSourceType::create(config.sub("source")));
+    const std::shared_ptr< const DefaultFunctionType > initial_values(DefaultFunctionType::create(config.sub("initial_values")));
+    const ConfigType grid_config = config.sub("grid");
+    const ConfigType boundary_info = config.sub("boundary_info");
+    const std::shared_ptr< const DefaultFunctionType > boundary_values(DefaultFunctionType::create(config.sub("boundary_values")));
+    return Stuff::Common::make_unique< ThisType >(flux, source, initial_values,
+                                                  grid_config, boundary_info, boundary_values);
+  } // ... create(...)
 
-  Burgers(const std::shared_ptr< const ConfigType > grid_config = std::make_shared< ConfigType >(default_config()),
-          const std::shared_ptr< const FluxType > flux = std::make_shared< ExpressionFunctionType >("x", "x[0]", 1),
-          const std::shared_ptr< const SourceType > source = std::make_shared< Expression1dFunctionType >("x", "0", 0),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< FunctionType >("x", "x[0]", 10),
-          const std::shared_ptr< const ConfigType > boundary_info = std::make_shared< ConfigType >("type", "dirichlet"),
-          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< FunctionType >("x", "0", 0))
-    : grid_config_(grid_config)
-    , flux_(flux)
+  Burgers(const std::shared_ptr< const FluxType > flux = std::make_shared< DefaultFluxType >("u", "1.0/2.0*u[0]*u[0]", 2),
+          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "0", 0),
+          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "sin(pi*x[0])", 10),
+          const ConfigType& grid_config = default_grid_config(),
+          const ConfigType& boundary_info = default_boundary_info_config(),
+          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "0", 0))
+    : flux_(flux)
     , source_(source)
     , initial_values_(initial_values)
+    , grid_config_(grid_config)
     , boundary_info_(boundary_info)
     , boundary_values_(boundary_values)
   {}
 
-//  virtual const std::shared_ptr< const FluxType >& flux() const override
-//  {
-//    return flux_;
-//  }
-
-//  virtual const std::shared_ptr< const SourceType >& source() const override
-//  {
-//    return source_;
-//  }
-
-//  virtual const std::shared_ptr< const FunctionType >& initial_values() const override
-//  {
-//    return initial_values_;
-//  }
-
-//  virtual const std::shared_ptr< const ConfigType >& grid_config() const override
-//  {
-//    return grid_config_;
-//  }
-
-//  virtual const std::shared_ptr< const ConfigType >& boundary_info() const override
-//  {
-//    return boundary_info_;
-//  }
-
-//  virtual const std::shared_ptr< const FunctionType >& boundary_values() const override
-//  {
-//    return boundary_values_;
-//  }
-
-
-  const std::shared_ptr< const FluxType >& flux() const
+  virtual const std::shared_ptr< const FluxType >& flux() const override
   {
     return flux_;
   }
 
-  const std::shared_ptr< const SourceType >& source() const
+  virtual const std::shared_ptr< const SourceType >& source() const override
   {
     return source_;
   }
 
-  const std::shared_ptr< const FunctionType >& initial_values() const
+  virtual const std::shared_ptr< const FunctionType >& initial_values() const override
   {
     return initial_values_;
   }
 
-  const std::shared_ptr< const ConfigType >& grid_config() const
+  virtual const ConfigType grid_config() const override
   {
     return grid_config_;
   }
 
-  const std::shared_ptr< const ConfigType >& boundary_info() const
+  virtual const ConfigType boundary_info() const override
   {
     return boundary_info_;
   }
 
-  const std::shared_ptr< const FunctionType >& boundary_values() const
+  virtual const std::shared_ptr< const FunctionType >& boundary_values() const override
   {
     return boundary_values_;
   }
 
 private:
-  const std::shared_ptr< const ConfigType >   grid_config_;
   const std::shared_ptr< const FluxType >     flux_;
   const std::shared_ptr< const SourceType >   source_;
   const std::shared_ptr< const FunctionType > initial_values_;
-  const std::shared_ptr< const ConfigType >   boundary_info_;
+  const ConfigType                            grid_config_;
+  const ConfigType                            boundary_info_;
   const std::shared_ptr< const FunctionType > boundary_values_;
 };
 
