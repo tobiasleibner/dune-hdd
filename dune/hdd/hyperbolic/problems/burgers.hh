@@ -98,7 +98,7 @@ public:
     flux_config["variable"] = "u";
     flux_config["expression"] = "1.0/2.0*u[0]*u[0]";
     flux_config["order"] = "2";
-    config.add(flux_config, "flux");
+    config.add(flux_config, "flux", true);
     if (sub_name.empty())
       return config;
     else {
