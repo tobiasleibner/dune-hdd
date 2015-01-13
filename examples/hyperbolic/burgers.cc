@@ -24,6 +24,7 @@
 #include <dune/gdt/operators/projections.hh>
 
 #include <dune/hdd/hyperbolic/problems/burgers.hh>
+#include <dune/hdd/hyperbolic/problems/default.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -36,10 +37,26 @@ int main()
     typedef Dune::YaspGrid< dimDomain >                     GridType;
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
-    //get problem
-    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    //ProblemType problem;
-    ProblemType problem = *(ProblemType::create(ProblemType::default_config()));
+    //configure Problem
+//    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef typename ProblemType::ConfigType ConfigType;
+    ConfigType problem_config = ProblemType::default_config();
+    //set boundary type ("periodic" or "dirichlet")
+    ConfigType boundary_config;
+//    boundary_config["type"] = "dirichlet";
+    boundary_config["type"] = "periodic";
+    problem_config.add(boundary_config, "boundary_info", true);
+    //set boundary values (ignored if boundary is periodic)
+    ConfigType boundary_value_config = ProblemType::DefaultFunctionType::default_config();
+    boundary_value_config["type"] = ProblemType::DefaultFunctionType::static_id();
+    boundary_value_config["variable"] = "x";
+    boundary_value_config["expression"] = "x[0]";
+    boundary_value_config["order"] = "1";
+    problem_config.add(boundary_value_config, "boundary_values", true);
+
+    //create Problem
+    ProblemType problem = *(ProblemType::create(problem_config));
 
     //get grid configuration from problem
     typedef typename ProblemType::ConfigType ConfigType;
@@ -51,13 +68,18 @@ int main()
     const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
 
     //get AnalyticFlux and initial values
-    typedef typename ProblemType::FluxType AnalyticFluxType;
-    typedef typename ProblemType::FunctionType FunctionType;
+    typedef typename ProblemType::FluxType         AnalyticFluxType;
+    typedef typename ProblemType::FunctionType     FunctionType;
+    typedef typename FunctionType::DomainFieldType DomainFieldType;
+    typedef typename ProblemType::RangeFieldType   RangeFieldType;
+    typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > IndicatorFunctionType;
+    typedef typename IndicatorFunctionType::DomainType DomainType;
     const std::shared_ptr< const AnalyticFluxType > analytical_flux = problem.flux();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
+//    const std::shared_ptr< const FunctionType > initial_values = std::make_shared< const IndicatorFunctionType >
+//            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
 
     // make a finite volume space on the leaf grid
-    typedef typename ProblemType::RangeFieldType                                RangeFieldType;
     typedef typename GridType::LeafGridView                                     GridViewType;
     typedef Spaces::FiniteVolume::Default< GridViewType, RangeFieldType, 1 >    FVSpaceType;
     const FVSpaceType fv_space(grid->leafGridView());
@@ -73,15 +95,14 @@ int main()
 
     // now do the time steps
     double t=0;
-    const double dt=0.005;
+    const double dt=0.0005;
     int time_step_counter=0;
     const double saveInterval = 0.01;
     double saveStep = 0.01;
     int save_step_counter = 1;
-    const double t_end = 10;
+    const double t_end = 5;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
-    typedef typename FunctionType::DomainFieldType DomainFieldType;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > ConstantFunctionType;
@@ -136,50 +157,64 @@ int main()
 
           //hack for periodic boundary in 1D
           if (intersection.boundary()) {
-            if (Dune::FloatCmp::eq(intersection.geometry().center()[0], 1.0)) {
-              right_boundary_entity_offset = offset;
-            } else if (Dune::FloatCmp::eq(intersection.geometry().center()[0], 0.0)) {
-              left_boundary_entity_offset = offset;
-            } else DUNE_THROW(Dune::NotImplemented, "Strange boundary intersection");
+            if (problem.boundary_info().get< std::string >("type") == "periodic") {
+              if (Dune::FloatCmp::eq(intersection.geometry().center()[0], 1.0)) {
+                right_boundary_entity_offset = offset;
+              } else if (Dune::FloatCmp::eq(intersection.geometry().center()[0], 0.0)) {
+                left_boundary_entity_offset = offset;
+              } else DUNE_THROW(Dune::NotImplemented, "Strange boundary intersection");
+            } else if (problem.boundary_info().get< std::string >("type") == "dirichlet") {
+              //define neighbor as the current entity, we just need to be able to evaluate the boundary values on the boundary
+              const auto& neighbor = *it;
+              const auto boundary_values_ptr = problem.boundary_values();
+              //make fake constant function that has the boundary value on the whole entity
+              ConstantFunctionType const_boundary_value(boundary_values_ptr->local_function(neighbor)->evaluate(intersection.geometry().center()));
+              const auto u_j_n = const_boundary_value.local_function(neighbor);
+              update[0][0] = RangeFieldType(0);
+              local_operator.apply(*u_i_n, *u_i_n, *u_j_n, *u_j_n, intersection, uselessmatrix, uselessmatrix, update, uselessmatrix, uselesstmplocalmatrix);
+              u_update_i_n->vector().add(0, -1.0*dt*update[0][0]);
+            } else DUNE_THROW(Dune::NotImplemented, "Only periodic or dirichlet boundary types are implemented!");
           }
         } // Intersection Walk
       } // Entity Grid Walk
 
       //handle boundary intersections (periodic boundary)
-      auto it_left = grid_view.template begin< 0 >();
-      for (int ii = 0; ii < left_boundary_entity_offset; ++ii)
-        ++it_left;
-      const EntityType& left_boundary_entity = *it_left;
-      //std::cout << "center left" << left_boundary_entity.geometry().center()[0] << std::endl;
-      auto it_right = grid_view.template begin< 0 >();
-      for (int ii = 0; ii < right_boundary_entity_offset; ++ii)
-        ++it_right;
-      const EntityType& right_boundary_entity = *it_right;
-      //std::cout << "center right" << right_boundary_entity.geometry().center()[0] << std::endl;
-      const auto u_left_n = u.local_discrete_function(left_boundary_entity);
-      const auto u_right_n = u.local_discrete_function(right_boundary_entity);
-      auto u_update_left_n = u_update.local_discrete_function(left_boundary_entity);
-      auto u_update_right_n = u_update.local_discrete_function(right_boundary_entity);
-      // left boundary entity
-      IntersectionIteratorType i_it_end = grid_view.iend(left_boundary_entity);
-      update[0][0] = RangeFieldType(0);
-      for (IntersectionIteratorType i_it = grid_view.ibegin(left_boundary_entity); i_it != i_it_end; ++i_it) {
-        const auto& intersection = *i_it;
-        if (intersection.boundary()) {
-          local_operator.apply(*u_left_n, *u_left_n, *u_right_n, *u_right_n, intersection, uselessmatrix, uselessmatrix, update, uselessmatrix, uselesstmplocalmatrix);
-          u_update_left_n->vector().add(0, -1.0*dt*update[0][0]);
+      if (problem.boundary_info().get< std::string >("type") == "periodic") {
+        auto it_left = grid_view.template begin< 0 >();
+        for (int ii = 0; ii < left_boundary_entity_offset; ++ii)
+          ++it_left;
+        const EntityType& left_boundary_entity = *it_left;
+        //std::cout << "center left" << left_boundary_entity.geometry().center()[0] << std::endl;
+        auto it_right = grid_view.template begin< 0 >();
+        for (int ii = 0; ii < right_boundary_entity_offset; ++ii)
+          ++it_right;
+        const EntityType& right_boundary_entity = *it_right;
+        //std::cout << "center right" << right_boundary_entity.geometry().center()[0] << std::endl;
+        const auto u_left_n = u.local_discrete_function(left_boundary_entity);
+        const auto u_right_n = u.local_discrete_function(right_boundary_entity);
+        auto u_update_left_n = u_update.local_discrete_function(left_boundary_entity);
+        auto u_update_right_n = u_update.local_discrete_function(right_boundary_entity);
+        // left boundary entity
+        IntersectionIteratorType i_it_end = grid_view.iend(left_boundary_entity);
+        update[0][0] = RangeFieldType(0);
+        for (IntersectionIteratorType i_it = grid_view.ibegin(left_boundary_entity); i_it != i_it_end; ++i_it) {
+          const auto& intersection = *i_it;
+          if (intersection.boundary()) {
+            local_operator.apply(*u_left_n, *u_left_n, *u_right_n, *u_right_n, intersection, uselessmatrix, uselessmatrix, update, uselessmatrix, uselesstmplocalmatrix);
+            u_update_left_n->vector().add(0, -1.0*dt*update[0][0]);
+          }
         }
-      }
-      // right boundary entity
-      i_it_end = grid_view.iend(right_boundary_entity);
-      update[0][0] = RangeFieldType(0);
-      for (IntersectionIteratorType i_it = grid_view.ibegin(right_boundary_entity); i_it != i_it_end; ++i_it) {
-        const auto& intersection = *i_it;
-        if (intersection.boundary()) {
-          local_operator.apply(*u_right_n, *u_right_n, *u_left_n, *u_left_n, intersection, uselessmatrix, uselessmatrix, update, uselessmatrix, uselesstmplocalmatrix);
-          u_update_right_n->vector().add(0, -1.0*dt*update[0][0]);
+        // right boundary entity
+        i_it_end = grid_view.iend(right_boundary_entity);
+        update[0][0] = RangeFieldType(0);
+        for (IntersectionIteratorType i_it = grid_view.ibegin(right_boundary_entity); i_it != i_it_end; ++i_it) {
+          const auto& intersection = *i_it;
+          if (intersection.boundary()) {
+            local_operator.apply(*u_right_n, *u_right_n, *u_left_n, *u_left_n, intersection, uselessmatrix, uselessmatrix, update, uselessmatrix, uselesstmplocalmatrix);
+            u_update_right_n->vector().add(0, -1.0*dt*update[0][0]);
+          }
         }
-      }
+      } // if ( ... == "periodic")
 
       //update u
       u.vector() += u_update.vector();
