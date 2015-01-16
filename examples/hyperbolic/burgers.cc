@@ -18,7 +18,7 @@
 #include <dune/stuff/la/container/common.hh>
 
 #include <dune/gdt/localoperator/codim1.hh>
-#include <dune/gdt/localevaluation/hyperbolic.hh>
+#include <dune/gdt/localevaluation/laxfriedrichs.hh>
 #include <dune/gdt/playground/spaces/finitevolume/default.hh>
 #include <dune/gdt/discretefunction/default.hh>
 #include <dune/gdt/operators/projections.hh>
@@ -40,12 +40,13 @@ int main()
     //configure Problem
 //    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
     typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef typename ProblemType::FunctionType BoundaryValueFunctionType;
     typedef typename ProblemType::ConfigType ConfigType;
     ConfigType problem_config = ProblemType::default_config();
     //set boundary type ("periodic" or "dirichlet")
     ConfigType boundary_config;
-//    boundary_config["type"] = "dirichlet";
-    boundary_config["type"] = "periodic";
+    boundary_config["type"] = "dirichlet";
+//    boundary_config["type"] = "periodic";
     problem_config.add(boundary_config, "boundary_info", true);
     //set boundary values (ignored if boundary is periodic)
     ConfigType boundary_value_config = ProblemType::DefaultFunctionType::default_config();
@@ -67,14 +68,14 @@ int main()
     GridProviderType grid_provider = *(GridProviderType::create(grid_config, "grid"));
     const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
 
-    //get AnalyticFlux and initial values
-    typedef typename ProblemType::FluxType         AnalyticFluxType;
+    //get analytical flux and initial values
+    typedef typename ProblemType::FluxType         AnalyticalFluxType;
     typedef typename ProblemType::FunctionType     FunctionType;
     typedef typename FunctionType::DomainFieldType DomainFieldType;
     typedef typename ProblemType::RangeFieldType   RangeFieldType;
     typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > IndicatorFunctionType;
     typedef typename IndicatorFunctionType::DomainType DomainType;
-    const std::shared_ptr< const AnalyticFluxType > analytical_flux = problem.flux();
+    const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
 //    const std::shared_ptr< const FunctionType > initial_values = std::make_shared< const IndicatorFunctionType >
 //            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
@@ -109,9 +110,13 @@ int main()
     ConstantFunctionType lambda(dt/dx);
 
     //get numerical flux and local operator
-    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichsFlux< ConstantFunctionType > NumericalFluxType;
+    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Inner< ConstantFunctionType > NumericalFluxType;
+    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Dirichlet< ConstantFunctionType, BoundaryValueFunctionType > NumericalBoundaryFluxType;
     typedef typename Dune::GDT::LocalOperator::Codim1FV< NumericalFluxType > LocalOperatorType;
+    typedef typename Dune::GDT::LocalOperator::Codim1FVBoundary< NumericalBoundaryFluxType > LocalBoundaryOperatorType;
     LocalOperatorType local_operator(*analytical_flux, lambda);
+    const std::shared_ptr< const BoundaryValueFunctionType > boundary_values = problem.boundary_values();
+    LocalBoundaryOperatorType local_boundary_operator(*analytical_flux, lambda, *boundary_values);
 
     while (t<t_end)
     {
@@ -164,14 +169,8 @@ int main()
                 left_boundary_entity_offset = offset;
               } else DUNE_THROW(Dune::NotImplemented, "Strange boundary intersection");
             } else if (problem.boundary_info().get< std::string >("type") == "dirichlet") {
-              //define neighbor as the current entity, we just need to be able to evaluate the boundary values on the boundary
-              const auto& neighbor = *it;
-              const auto boundary_values_ptr = problem.boundary_values();
-              //make fake constant function that has the boundary value on the whole entity
-              ConstantFunctionType const_boundary_value(boundary_values_ptr->local_function(neighbor)->evaluate(intersection.geometry().center()));
-              const auto u_j_n = const_boundary_value.local_function(neighbor);
               update[0][0] = RangeFieldType(0);
-              local_operator.apply(*u_i_n, *u_i_n, *u_j_n, *u_j_n, intersection, uselessmatrix, uselessmatrix, update, uselessmatrix, uselesstmplocalmatrix);
+              local_boundary_operator.apply(*u_i_n, *u_i_n, intersection, update, uselesstmplocalmatrix);
               u_update_i_n->vector().add(0, -1.0*dt*update[0][0]);
             } else DUNE_THROW(Dune::NotImplemented, "Only periodic or dirichlet boundary types are implemented!");
           }
