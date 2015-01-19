@@ -8,6 +8,8 @@
 
 #include <ostream>
 
+#include <dune/grid/yaspgrid.hh>
+
 #include <dune/stuff/common/configuration.hh>
 #include <dune/stuff/common/exceptions.hh>
 #include <dune/stuff/functions/default.hh>
@@ -42,8 +44,11 @@ public:
   typedef RangeFieldImp     RangeFieldType;
   static const unsigned int dimRange = 1;
 
-  typedef Dune::Stuff::GlobalFunctionInterface< EntityType, RangeFieldType, dimRange, RangeFieldType, dimDomain > FluxType;
-  typedef Dune::Stuff::GlobalFunctionInterface< EntityType, RangeFieldType, dimRange, RangeFieldType, 1 >         SourceType; // depends on u
+//  we do not have a grid for the range space, but still need an EntityType with dimension dimRange for FluxType and
+//  SourceType, so just choose an arbitrary one
+  typedef typename Dune::YaspGrid< dimRange >::template Codim< 0 >::Entity           FluxSourceEntityType;
+  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimDomain > FluxType;
+  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, 1 >         SourceType; // depends on u
 //  typedef Dune::Stuff::LocalizableFunctionInterface
 //      < EntityType, DomainFieldType, 1, RangeFieldType, 1 >          SourceType; // depends on x
   typedef Dune::Stuff::LocalizableFunctionInterface

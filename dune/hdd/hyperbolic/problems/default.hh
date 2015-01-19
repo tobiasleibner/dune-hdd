@@ -46,14 +46,17 @@ class Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
 {
   typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > BaseType;
   typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ThisType;
+  static const unsigned int dimRange = 1;
+
+  typedef typename BaseType::FluxSourceEntityType FluxSourceEntityType;
 
 public:
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, RangeFieldImp, 1, RangeFieldImp, domainDim > DefaultFluxType;
+                < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, domainDim > DefaultFluxType;
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > DefaultFunctionType;
+                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, 1, RangeFieldImp, 1, 1 > DefaultSourceType;
+                < FluxSourceEntityType, RangeFieldImp, dimRange, DomainFieldImp, 1, 1 > DefaultSourceType;
   typedef typename Dune::Stuff::Functions::Indicator< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > IndicatorFunctionType;
 
   typedef typename BaseType::FluxType          FluxType;
@@ -87,7 +90,7 @@ private:
     grid_config["type"] = "provider.cube";
     grid_config["ll"] = "[0, 0]";
     grid_config["ur"] = "[1, 1]";
-    grid_config["num_elements"] = "[1000 8 8 8]";
+    grid_config["num_elements"] = "[1000 1000 8 8]";
     return grid_config;
   }
 
@@ -107,7 +110,7 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = FluxType::static_id();
     flux_config["variable"] = "u";
-    flux_config["expression"] = "1.0/2.0*u[0]*u[0]";
+    flux_config["expression"] = "[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
     flux_config["order"] = "2";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
