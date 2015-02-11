@@ -14,13 +14,14 @@
 
 #include <dune/stuff/grid/provider/cube.hh>
 #include <dune/stuff/grid/information.hh>
+#include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
 
 #include <dune/gdt/assembler/local/codim1.hh>
 #include <dune/gdt/assembler/system.hh>
 #include <dune/gdt/localoperator/codim1.hh>
 #include <dune/gdt/localevaluation/laxfriedrichs.hh>
-#include <dune/gdt/playground/spaces/finitevolume/default.hh>
+#include <dune/gdt/spaces/fv/default.hh>
 #include <dune/gdt/discretefunction/default.hh>
 #include <dune/gdt/operators/projections.hh>
 
@@ -83,9 +84,11 @@ int main()
 
     // make a finite volume space on the leaf grid
     typedef typename GridType::LeafGridView                                     GridViewType;
-    typedef Spaces::FiniteVolume::Default< GridViewType, RangeFieldType, 1 >    FVSpaceType;
-    GridViewType grid_view = grid->leafGridView();
-    const FVSpaceType fv_space(grid_view);
+    typedef typename Dune::Stuff::Grid::PeriodicGridView< GridViewType >        PeriodicGridViewType;
+    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
+    const GridViewType grid_view = grid->leafGridView();
+    const PeriodicGridViewType periodic_grid_view(grid_view);
+    const FVSpaceType fv_space(periodic_grid_view);
     //const auto& grid_view = fv_space.grid_view();
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
@@ -100,7 +103,7 @@ int main()
 
     // now do the time steps
     double t=0;
-    const double dt=0.0005;
+    const double dt=0.005;
     int time_step_counter=0;
     const double saveInterval = 0.01;
     double saveStep = 0.01;
@@ -108,7 +111,7 @@ int main()
     const double t_end = 5;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
-    Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
+    Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > ConstantFunctionType;
     ConstantFunctionType lambda(dt/dx);
