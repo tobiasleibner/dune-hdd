@@ -17,6 +17,8 @@
 #include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
 
+#include <dune/stuff/common/string.hh>
+
 #include <dune/gdt/assembler/local/codim1.hh>
 #include <dune/gdt/assembler/system.hh>
 #include <dune/gdt/localoperator/codim1.hh>
@@ -33,7 +35,7 @@ using namespace Dune::HDD;
 
 int main()
 {
-    static const int dimDomain = 1;
+    static const int dimDomain = 2;
     static const int dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                     GridType;
@@ -47,8 +49,8 @@ int main()
     ConfigType problem_config = ProblemType::default_config();
     //set boundary type ("periodic" or "dirichlet")
     ConfigType boundary_config;
-    boundary_config["type"] = "dirichlet";
-//    boundary_config["type"] = "periodic";
+//    boundary_config["type"] = "dirichlet";
+    boundary_config["type"] = "periodic";
     problem_config.add(boundary_config, "boundary_info", true);
     //set boundary values (ignored if boundary is periodic)
     ConfigType boundary_value_config = ProblemType::DefaultFunctionType::default_config();
@@ -73,48 +75,58 @@ int main()
     typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > IndicatorFunctionType;
     typedef typename IndicatorFunctionType::DomainType DomainType;
     const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
-    const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
-//    const std::shared_ptr< const FunctionType > initial_values = std::make_shared< const IndicatorFunctionType >
-//            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
+//    const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
+    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create(); //std::make_shared< const IndicatorFunctionType >
+            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
 
     //create grid
+    std::cout << "Creating Grid..." << std::endl;
     typedef Dune::Stuff::Grid::Providers::Cube< GridType >  GridProviderType;
     GridProviderType grid_provider = *(GridProviderType::create(grid_config, "grid"));
     const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
 
     // make a finite volume space on the leaf grid
+    std::cout << "Creating FiniteVolumeSpace..." << std::endl;
     typedef typename GridType::LeafGridView                                     GridViewType;
+    const GridViewType grid_view = grid->leafGridView();
+    const GridViewType& grid_view_ref = grid_view;
     typedef typename Dune::Stuff::Grid::PeriodicGridView< GridViewType >        PeriodicGridViewType;
     typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
-    const GridViewType grid_view = grid->leafGridView();
-    const PeriodicGridViewType periodic_grid_view(grid_view);
+    std::bitset< dimDomain > periodic_directions;
+    if (problem.boundary_info()["type"] == "periodic")
+      periodic_directions.set();
+    const PeriodicGridViewType periodic_grid_view(grid_view_ref, periodic_directions);
     const FVSpaceType fv_space(periodic_grid_view);
-    //const auto& grid_view = fv_space.grid_view();
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
+    std::cout << "Allocate discrete functions..." << std::endl;
     typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< RangeFieldType > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
     FVFunctionType u_update(fv_space, "solution");
     std::cout << "u vector " << u.vector().size() << std:: endl;
 
     //visualize initial values
-    Operators::apply_projection(*initial_values, u);
+    std::cout << "Projecting initial values..." << std::endl;
+    project(*initial_values, u);
+    std::cout << "Visualizing initial values..." << std::endl;
     u.visualize("concentration_0", false);
 
     // now do the time steps
     double t=0;
-    const double dt=0.005;
+    const double dt=0.0005;
     int time_step_counter=0;
-    const double saveInterval = 0.01;
-    double saveStep = 0.01;
+    const double saveInterval = 0.001;
+    double saveStep = 0.001;
     int save_step_counter = 1;
-    const double t_end = 5;
+    const double t_end = 2;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
+    std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > ConstantFunctionType;
     ConstantFunctionType lambda(dt/dx);
+    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
     //get numerical flux and local operator
     typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Inner< ConstantFunctionType > NumericalFluxType;
@@ -133,6 +145,7 @@ int main()
     const LocalAssembler::Codim1BoundaryFV< LocalBoundaryOperatorType > boundary_assembler(local_boundary_operator);
 
     //time loop
+    std::cout << "Starting time loop..." << std::endl;
     while (t<t_end)
     {
       //clear update vector
@@ -146,6 +159,7 @@ int main()
       systemAssembler.assemble();
 
       //update u
+//      std::cout << Dune::Stuff::Common::toString(u_update.vector()) << std::endl;
       u.vector() += u_update.vector()*(-1.0*dt);
 
       // augment time step counter
