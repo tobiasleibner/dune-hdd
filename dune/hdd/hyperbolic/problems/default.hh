@@ -8,22 +8,10 @@
 
 #include <memory>
 
-#include <boost/numeric/conversion/cast.hpp>
-
 #include <dune/common/static_assert.hh>
-#include <dune/common/timer.hh>
 
-#include <dune/grid/multiscale/provider/cube.hh>
-
-#include <dune/stuff/common/memory.hh>
 #include <dune/stuff/functions/constant.hh>
 #include <dune/stuff/functions/expression.hh>
-#include <dune/stuff/playground/functions/indicator.hh>
-#include <dune/stuff/grid/provider/cube.hh>
-#include <dune/stuff/grid/boundaryinfo.hh>
-
-#include <dune/pymor/functions/default.hh>
-#include <dune/pymor/functions/checkerboard.hh>
 
 #include "interfaces.hh"
 
@@ -54,50 +42,47 @@ public:
   typedef typename Dune::Stuff::Functions::Expression
                 < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, domainDim > DefaultFluxType;
   typedef typename Dune::Stuff::Functions::Expression
+                < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, domainDim, dimRange > DefaultFluxDerivativeType;
+  typedef typename Dune::Stuff::Functions::Expression
                 < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
   typedef typename Dune::Stuff::Functions::Expression
                 < FluxSourceEntityType, RangeFieldImp, dimRange, DomainFieldImp, 1, 1 > DefaultSourceType;
-  typedef typename Dune::Stuff::Functions::Indicator< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1, 1 > IndicatorFunctionType;
 
-  typedef typename BaseType::FluxType          FluxType;
-  typedef typename BaseType::SourceType        SourceType;
-  typedef typename BaseType::FunctionType      FunctionType;
-  typedef typename BaseType::ConfigType        ConfigType;
-  typedef typename BaseType::RangeFieldType    RangeFieldType;
+  typedef typename BaseType::FluxType           FluxType;
+  typedef typename BaseType::FluxDerivativeType FluxDerivativeType;
+  typedef typename BaseType::SourceType         SourceType;
+  typedef typename BaseType::FunctionType       FunctionType;
+  typedef typename BaseType::ConfigType         ConfigType;
+  typedef typename BaseType::RangeFieldType     RangeFieldType;
 
-  typedef typename IndicatorFunctionType::DomainType    DomainType;
-  typedef typename IndicatorFunctionType::RangeType     RangeType;
+  typedef typename DefaultFunctionType::DomainType    DomainType;
+  typedef typename DefaultFunctionType::RangeType     RangeType;
 
   static std::string static_id()
   {
-    return BaseType::static_id() + ".burgers";
+    return BaseType::static_id() + ".default";
   }
-
-//  virtual std::string type() const override
-//  {
-//    return BaseType::type() + ".burgers";
-//  }
 
   std::string type() const
   {
     return BaseType::type() + ".default";
   }
 
-private:
+protected:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
     grid_config["type"] = "provider.cube";
     grid_config["ll"] = "[0, 0]";
     grid_config["ur"] = "[1, 1]";
-    grid_config["num_elements"] = "[1000 1000 8 8]";
+    grid_config["num_elements"] = "[60 60 60 8]";
     return grid_config;
   }
 
   static ConfigType default_boundary_info_config()
   {
     ConfigType boundary_config;
-    boundary_config["type"] = "dirichlet";
+    boundary_config["type"] = "periodic";
     return boundary_config;
   }
 
@@ -110,9 +95,15 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = FluxType::static_id();
     flux_config["variable"] = "u";
-    flux_config["expression"] = "[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
+    flux_config["expression"] = "[u[0] u[0] u[0]]"; //"[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
     flux_config["order"] = "2";
     config.add(flux_config, "flux");
+    ConfigType flux_derivative_config = DefaultFluxDerivativeType::default_config();
+    flux_derivative_config["type"] = FluxDerivativeType::static_id();
+    flux_derivative_config["variable"] = "u";
+    flux_derivative_config["expression"] = "[1 1 1]"; //"[u[0] u[0] u[0]]";
+    flux_derivative_config["order"] = "1";
+    config.add(flux_derivative_config, "flux_derivative");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["type"] = SourceType::static_id();
     source_config["variable"] = "u";
@@ -122,7 +113,7 @@ public:
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
     initial_value_config["variable"] = "x";
-    initial_value_config["expression"] = "sin(pi*x[0])";
+    initial_value_config["expression"] = "sin(pi*x[0])"; //"1.0/40.0*exp(1-(2*pi*x[0] - pi)*(2*pi*x[0] - pi) - (2*pi*x[1] - pi)*(2*pi*x[1] - pi))";
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values");
     ConfigType boundary_value_config = DefaultFunctionType::default_config();
@@ -145,22 +136,25 @@ public:
   {
     const ConfigType config = cfg.has_sub(sub_name) ? cfg.sub(sub_name) : cfg;
     const std::shared_ptr< const DefaultFluxType > flux(DefaultFluxType::create(config.sub("flux")));
+    const std::shared_ptr< const DefaultFluxDerivativeType > flux_derivative(DefaultFluxDerivativeType::create(config.sub("flux_derivative")));
     const std::shared_ptr< const DefaultSourceType > source(DefaultSourceType::create(config.sub("source")));
     const std::shared_ptr< const DefaultFunctionType > initial_values(DefaultFunctionType::create(config.sub("initial_values")));
     const ConfigType grid_config = config.sub("grid");
     const ConfigType boundary_info = config.sub("boundary_info");
     const std::shared_ptr< const DefaultFunctionType > boundary_values(DefaultFunctionType::create(config.sub("boundary_values")));
-    return Stuff::Common::make_unique< ThisType >(flux, source, initial_values,
+    return Stuff::Common::make_unique< ThisType >(flux, flux_derivative, source, initial_values,
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
-  Default(const std::shared_ptr< const FluxType > flux = std::make_shared< DefaultFluxType >("u", "1.0/2.0*u[0]*u[0]", 2),
+  Default(const std::shared_ptr< const FluxType > flux,
+          const std::shared_ptr< const FluxDerivativeType > flux_derivative,
           const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "0", 0),
           const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "sin(pi*x[0])", 10),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
           const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "0", 0))
     : flux_(flux)
+    , flux_derivative_(flux_derivative)
     , source_(source)
     , initial_values_(initial_values)
     , grid_config_(grid_config)
@@ -171,6 +165,11 @@ public:
   virtual const std::shared_ptr< const FluxType >& flux() const override
   {
     return flux_;
+  }
+
+  virtual const std::shared_ptr< const FluxDerivativeType >& flux_derivative() const override
+  {
+    return flux_derivative_;
   }
 
   virtual const std::shared_ptr< const SourceType >& source() const override
@@ -199,12 +198,13 @@ public:
   }
 
 private:
-  const std::shared_ptr< const FluxType >     flux_;
-  const std::shared_ptr< const SourceType >   source_;
-  const std::shared_ptr< const FunctionType > initial_values_;
-  const ConfigType                            grid_config_;
-  const ConfigType                            boundary_info_;
-  const std::shared_ptr< const FunctionType > boundary_values_;
+  const std::shared_ptr< const FluxType >           flux_;
+  const std::shared_ptr< const FluxDerivativeType > flux_derivative_;
+  const std::shared_ptr< const SourceType >         source_;
+  const std::shared_ptr< const FunctionType >       initial_values_;
+  const ConfigType                                  grid_config_;
+  const ConfigType                                  boundary_info_;
+  const std::shared_ptr< const FunctionType >       boundary_values_;
 };
 
 } // namespace Problems

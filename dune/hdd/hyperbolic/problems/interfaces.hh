@@ -48,6 +48,7 @@ public:
 //  SourceType, so just choose an arbitrary one
   typedef typename Dune::YaspGrid< dimRange >::template Codim< 0 >::Entity           FluxSourceEntityType;
   typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimDomain > FluxType;
+  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimDomain, dimRange > FluxDerivativeType;
   typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, 1 >         SourceType; // depends on u
 //  typedef Dune::Stuff::LocalizableFunctionInterface
 //      < EntityType, DomainFieldType, 1, RangeFieldType, 1 >          SourceType; // depends on x
@@ -68,6 +69,8 @@ public:
   }
 
   virtual const std::shared_ptr< const FluxType >& flux() const = 0;
+
+  virtual const std::shared_ptr< const FluxDerivativeType >& flux_derivative() const = 0;
 
   virtual const std::shared_ptr< const SourceType >& source() const = 0;
 
