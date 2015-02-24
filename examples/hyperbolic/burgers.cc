@@ -12,12 +12,13 @@
 
 #include <dune/common/parallel/mpihelper.hh> // include mpi helper class
 
+#include <dune/stuff/common/string.hh>
 #include <dune/stuff/grid/provider/cube.hh>
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
 
-#include <dune/stuff/common/string.hh>
+#include <dune/stuff/playground/functions/indicator.hh>
 
 #include <dune/gdt/assembler/local/codim1.hh>
 #include <dune/gdt/assembler/system.hh>
@@ -27,6 +28,8 @@
 #include <dune/gdt/discretefunction/default.hh>
 #include <dune/gdt/operators/projections.hh>
 
+#include <dune/grid/alugrid/common/declaration.hh>
+
 #include <dune/hdd/hyperbolic/problems/burgers.hh>
 #include <dune/hdd/hyperbolic/problems/default.hh>
 
@@ -35,10 +38,11 @@ using namespace Dune::HDD;
 
 int main()
 {
-    static const int dimDomain = 2;
+    static const int dimDomain = 1;
     static const int dimRange = 1;
     //choose GridType
-    typedef Dune::YaspGrid< dimDomain >                     GridType;
+    typedef Dune::YaspGrid< dimDomain >                                     GridType;
+//    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
@@ -68,16 +72,18 @@ int main()
     const auto grid_config = problem.grid_config();
 
     //get analytical flux and initial values
-    typedef typename ProblemType::FluxType         AnalyticalFluxType;
-    typedef typename ProblemType::FunctionType     FunctionType;
-    typedef typename FunctionType::DomainFieldType DomainFieldType;
-    typedef typename ProblemType::RangeFieldType   RangeFieldType;
+    typedef typename ProblemType::FluxType            AnalyticalFluxType;
+    typedef typename ProblemType::FluxDerivativeType  AnalyticalFluxDerivativeType;
+    typedef typename ProblemType::FunctionType        FunctionType;
+    typedef typename FunctionType::DomainFieldType    DomainFieldType;
+    typedef typename ProblemType::RangeFieldType      RangeFieldType;
     typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > IndicatorFunctionType;
     typedef typename IndicatorFunctionType::DomainType DomainType;
     const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
-//    const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
-    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create(); //std::make_shared< const IndicatorFunctionType >
-            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
+    const std::shared_ptr< const AnalyticalFluxDerivativeType > analytical_flux_derivative = problem.flux_derivative();
+    const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
+//    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create(); //std::make_shared< const IndicatorFunctionType >
+//            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
 
     //create grid
     std::cout << "Creating Grid..." << std::endl;
@@ -86,7 +92,7 @@ int main()
     const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
 
     // make a finite volume space on the leaf grid
-    std::cout << "Creating FiniteVolumeSpace..." << std::endl;
+    std::cout << "Creating GridView..." << std::endl;
     typedef typename GridType::LeafGridView                                     GridViewType;
     const GridViewType grid_view = grid->leafGridView();
     const GridViewType& grid_view_ref = grid_view;
@@ -95,15 +101,16 @@ int main()
     std::bitset< dimDomain > periodic_directions;
     if (problem.boundary_info()["type"] == "periodic")
       periodic_directions.set();
+    std::cout << "Creating PeriodicGridView..." << std::endl;
     const PeriodicGridViewType periodic_grid_view(grid_view_ref, periodic_directions);
+    std::cout << "Creating FiniteVolumeSpace..." << std::endl;
     const FVSpaceType fv_space(periodic_grid_view);
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
-    std::cout << "Allocate discrete functions..." << std::endl;
+    std::cout << "Allocating discrete functions..." << std::endl;
     typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< RangeFieldType > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
     FVFunctionType u_update(fv_space, "solution");
-    std::cout << "u vector " << u.vector().size() << std:: endl;
 
     //visualize initial values
     std::cout << "Projecting initial values..." << std::endl;
@@ -118,7 +125,7 @@ int main()
     const double saveInterval = 0.001;
     double saveStep = 0.001;
     int save_step_counter = 1;
-    const double t_end = 2;
+    const double t_end = 0.3;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
@@ -129,11 +136,12 @@ int main()
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
     //get numerical flux and local operator
+//    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Inner< ConstantFunctionType > NumericalFluxType;
     typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Inner< ConstantFunctionType > NumericalFluxType;
     typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Dirichlet< ConstantFunctionType, BoundaryValueFunctionType > NumericalBoundaryFluxType;
     typedef typename Dune::GDT::LocalOperator::Codim1FV< NumericalFluxType > LocalOperatorType;
     typedef typename Dune::GDT::LocalOperator::Codim1FVBoundary< NumericalBoundaryFluxType > LocalBoundaryOperatorType;
-    const LocalOperatorType local_operator(*analytical_flux, lambda);
+    const LocalOperatorType local_operator(*analytical_flux, *analytical_flux_derivative, lambda);
     const std::shared_ptr< const BoundaryValueFunctionType > boundary_values = problem.boundary_values();
     const LocalBoundaryOperatorType local_boundary_operator(*analytical_flux, lambda, *boundary_values);
 
