@@ -38,7 +38,7 @@ using namespace Dune::HDD;
 
 int main()
 {
-    static const int dimDomain = 1;
+    static const int dimDomain = 2;
     static const int dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
@@ -46,8 +46,8 @@ int main()
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
-//    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
     typedef typename ProblemType::FunctionType BoundaryValueFunctionType;
     typedef typename ProblemType::ConfigType ConfigType;
     ConfigType problem_config = ProblemType::default_config();
@@ -111,6 +111,7 @@ int main()
     typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< RangeFieldType > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
     FVFunctionType u_update(fv_space, "solution");
+    FVFunctionType u_intermediate(fv_space, "solution");
 
     //visualize initial values
     std::cout << "Projecting initial values..." << std::endl;
@@ -120,12 +121,12 @@ int main()
 
     // now do the time steps
     double t=0;
-    const double dt=0.0005;
+    const double dt=0.002;
     int time_step_counter=0;
-    const double saveInterval = 0.001;
-    double saveStep = 0.001;
+    const double saveInterval = 0.004;
+    double saveStep = 0.004;
     int save_step_counter = 1;
-    const double t_end = 0.3;
+    const double t_end = 1;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
@@ -158,6 +159,7 @@ int main()
     {
       //clear update vector
       u_update.vector() *= RangeFieldType(0);
+      u_intermediate.vector() = u.vector();
 
       //add local assemblers
       systemAssembler.add(inner_assembler, u, u_update);
@@ -166,9 +168,22 @@ int main()
       //walk the grid
       systemAssembler.assemble();
 
+      u_intermediate.vector() += u_update.vector()*(-1.0*dt);
+      //clear update vector
+      u_update.vector() *= RangeFieldType(0);
+
+      //add local assemblers
+      systemAssembler.add(inner_assembler, u_intermediate, u_update);
+      systemAssembler.add(boundary_assembler, u_intermediate, u_update);
+
+      //walk the grid
+      systemAssembler.assemble();
+
       //update u
 //      std::cout << Dune::Stuff::Common::toString(u_update.vector()) << std::endl;
-      u.vector() += u_update.vector()*(-1.0*dt);
+      u_intermediate.vector() += u_update.vector()*(-1.0*dt);
+
+      u.vector() = 0.5*(u.vector() + u_intermediate.vector());
 
       // augment time step counter
       ++time_step_counter;
