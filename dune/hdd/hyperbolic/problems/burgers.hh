@@ -39,12 +39,10 @@ class Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
 
 public:
   typedef typename BaseType::DefaultFluxType            DefaultFluxType;
-  typedef typename BaseType::DefaultFluxDerivativeType  DefaultFluxDerivativeType;
   typedef typename BaseType::DefaultFunctionType        DefaultFunctionType;
   typedef typename BaseType::DefaultSourceType          DefaultSourceType;
 
   typedef typename BaseType::FluxType                   FluxType;
-  typedef typename BaseType::FluxDerivativeType         FluxDerivativeType;
   typedef typename BaseType::SourceType                 SourceType;
   typedef typename BaseType::FunctionType               FunctionType;
   typedef typename BaseType::ConfigType                 ConfigType;
@@ -85,13 +83,8 @@ public:
     flux_config["variable"] = "u";
     flux_config["expression"] = "[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
     flux_config["order"] = "2";
+    flux_config["gradient"] = "[u[0] u[0] u[0]]";
     config.add(flux_config, "flux", true);
-    ConfigType flux_derivative_config = DefaultFluxDerivativeType::default_config();
-    flux_derivative_config["type"] = FluxDerivativeType::static_id();
-    flux_derivative_config["variable"] = "u";
-    flux_derivative_config["expression"] = "[u[0] u[0] u[0]]";
-    flux_derivative_config["order"] = "1";
-    config.add(flux_derivative_config, "flux_derivative", true);
     if (sub_name.empty())
       return config;
     else {
@@ -106,8 +99,11 @@ public:
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
           const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "0", 0))
-    : BaseType(std::make_shared< DefaultFluxType >("u", std::vector< std::string >(3, "1.0/2.0*u[0]*u[0]"), 2),
-               std::make_shared< DefaultFluxDerivativeType >("u", std::vector< std::string >(3, "u[0]"), 1),
+    : BaseType(std::make_shared< DefaultFluxType >("u",
+                                                   std::vector< std::string >(3, "1.0/2.0*u[0]*u[0]"),
+                                                   2,
+                                                   DefaultFluxType::static_id(),
+                                                   std::vector< std::vector< std::string > >{{"u[0]"}, {"u[0]"}, {"u[0]"}}),
                source,
                initial_values,
                grid_config,

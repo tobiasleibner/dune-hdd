@@ -39,7 +39,7 @@ using namespace Dune::HDD;
 int main()
 {
   try {
-    static const int dimDomain = 1;
+    static const int dimDomain = 2;
     static const int dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
@@ -66,7 +66,8 @@ int main()
     problem_config.add(boundary_value_config, "boundary_values", true);
 
     //create Problem
-    ProblemType problem = *(ProblemType::create(problem_config));
+    const auto problem_ptr = ProblemType::create();
+    const auto& problem = *problem_ptr;
 
     //get grid configuration from problem
     typedef typename ProblemType::ConfigType ConfigType;
@@ -74,14 +75,12 @@ int main()
 
     //get analytical flux and initial values
     typedef typename ProblemType::FluxType            AnalyticalFluxType;
-    typedef typename ProblemType::FluxDerivativeType  AnalyticalFluxDerivativeType;
     typedef typename ProblemType::FunctionType        FunctionType;
     typedef typename FunctionType::DomainFieldType    DomainFieldType;
     typedef typename ProblemType::RangeFieldType      RangeFieldType;
     typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > IndicatorFunctionType;
     typedef typename IndicatorFunctionType::DomainType DomainType;
     const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
-    const std::shared_ptr< const AnalyticalFluxDerivativeType > analytical_flux_derivative = problem.flux_derivative();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
 //    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create(); //std::make_shared< const IndicatorFunctionType >
 //            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
@@ -143,7 +142,7 @@ int main()
     typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Dirichlet< ConstantFunctionType, BoundaryValueFunctionType > NumericalBoundaryFluxType;
     typedef typename Dune::GDT::LocalOperator::Codim1FV< NumericalFluxType > LocalOperatorType;
     typedef typename Dune::GDT::LocalOperator::Codim1FVBoundary< NumericalBoundaryFluxType > LocalBoundaryOperatorType;
-    const LocalOperatorType local_operator(*analytical_flux, *analytical_flux_derivative, lambda);
+    const LocalOperatorType local_operator(*analytical_flux, lambda);
     const std::shared_ptr< const BoundaryValueFunctionType > boundary_values = problem.boundary_values();
     const LocalBoundaryOperatorType local_boundary_operator(*analytical_flux, lambda, *boundary_values);
 
