@@ -38,7 +38,8 @@ using namespace Dune::HDD;
 
 int main()
 {
-    static const int dimDomain = 2;
+  try {
+    static const int dimDomain = 1;
     static const int dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
@@ -210,4 +211,8 @@ int main()
     std::cout << "Finished!!\n";
 
     return 0;
+  } catch (Dune::Exception& e) {
+    std::cerr << "Dune reported: " << e.what() << std::endl;
+    std::abort;
+  }
 } // ... main(...)
