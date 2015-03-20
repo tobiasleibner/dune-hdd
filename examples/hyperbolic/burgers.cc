@@ -17,6 +17,7 @@
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
+#include <dune/stuff/playground/timestepper.hh>
 
 #include <dune/stuff/playground/functions/indicator.hh>
 
@@ -27,6 +28,7 @@
 #include <dune/gdt/spaces/fv/default.hh>
 #include <dune/gdt/discretefunction/default.hh>
 #include <dune/gdt/operators/projections.hh>
+#include <dune/gdt/operators/hyperbolic.hh>
 
 #include <dune/grid/alugrid/common/declaration.hh>
 
@@ -39,11 +41,11 @@ using namespace Dune::HDD;
 int main()
 {
   try {
-    static const int dimDomain = 2;
+    static const int dimDomain = 3;
     static const int dimRange = 1;
     //choose GridType
-    typedef Dune::YaspGrid< dimDomain >                                     GridType;
-//    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
+//    typedef Dune::YaspGrid< dimDomain >                                     GridType;
+    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
@@ -110,22 +112,13 @@ int main()
     std::cout << "Allocating discrete functions..." << std::endl;
     typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< RangeFieldType > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
-    FVFunctionType u_update(fv_space, "solution");
-    FVFunctionType u_intermediate(fv_space, "solution");
 
     //visualize initial values
     std::cout << "Projecting initial values..." << std::endl;
     project(*initial_values, u);
-    std::cout << "Visualizing initial values..." << std::endl;
-    u.visualize("concentration_0", false);
 
-    // now do the time steps
-    double t=0;
-    const double dt=0.002;
-    int time_step_counter=0;
-    const double saveInterval = 0.004;
-    double saveStep = 0.004;
-    int save_step_counter = 1;
+    const double dt=0.0002;
+    const double saveInterval = 0.0004;
     const double t_end = 1;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
@@ -133,79 +126,26 @@ int main()
     Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > ConstantFunctionType;
-    ConstantFunctionType lambda(dt/dx);
+    ConstantFunctionType ratio_dt_dx(dt/dx);
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    //get numerical flux and local operator
-//    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Inner< ConstantFunctionType > NumericalFluxType;
-    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Inner< ConstantFunctionType > NumericalFluxType;
-    typedef typename Dune::GDT::LocalEvaluation::LaxFriedrichs::Dirichlet< ConstantFunctionType, BoundaryValueFunctionType > NumericalBoundaryFluxType;
-    typedef typename Dune::GDT::LocalOperator::Codim1FV< NumericalFluxType > LocalOperatorType;
-    typedef typename Dune::GDT::LocalOperator::Codim1FVBoundary< NumericalBoundaryFluxType > LocalBoundaryOperatorType;
-    const LocalOperatorType local_operator(*analytical_flux, lambda);
-    const std::shared_ptr< const BoundaryValueFunctionType > boundary_values = problem.boundary_values();
-    const LocalBoundaryOperatorType local_boundary_operator(*analytical_flux, lambda, *boundary_values);
+    //create operator
+    typedef typename Dune::GDT::Operators::HyperbolicLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, FVSpaceType > OperatorType;
+    OperatorType lax_friedrichs_operator(analytical_flux, ratio_dt_dx, fv_space);
 
+    //create butcher_array
+//    Dune::FieldMatrix< RangeFieldType, 2, 2 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 2, 2 > >("[0 0; 0 1]"));
+//    const Dune::FieldMatrix< RangeFieldType, 3, 3 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 3, 3 > >("[0 0 0; 0 1 0; 0 0.5 0.5]"));
+    const Dune::FieldMatrix< RangeFieldType, 5, 5 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 5, 5 > >("[0 0 0 0 0; 0.5 0.5 0 0 0; 0.5 0 0.5 0 0; 1 0 0 1 0; 0 " + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 
-    //get system assembler
-    typedef SystemAssembler< FVSpaceType > SystemAssemblerType;
-    SystemAssemblerType systemAssembler(fv_space);
-    const LocalAssembler::Codim1CouplingFV< LocalOperatorType > inner_assembler(local_operator);
-    const LocalAssembler::Codim1BoundaryFV< LocalBoundaryOperatorType > boundary_assembler(local_boundary_operator);
+//    std::cout << DSC::toString(butcher_array) << std::endl;
+    //create timestepper
+    std::cout << "Creating TimeStepper..." << std::endl;
+    Dune::Stuff::RungeKuttaTimeStepper< OperatorType, FVFunctionType, 4 > timestepper(lax_friedrichs_operator, butcher_array, u);
 
-    //time loop
+    // now do the time steps
     std::cout << "Starting time loop..." << std::endl;
-    while (t<t_end)
-    {
-      //clear update vector
-      u_update.vector() *= RangeFieldType(0);
-      u_intermediate.vector() = u.vector();
-
-      //add local assemblers
-      systemAssembler.add(inner_assembler, u, u_update);
-      systemAssembler.add(boundary_assembler, u, u_update);
-
-      //walk the grid
-      systemAssembler.assemble();
-
-      u_intermediate.vector() += u_update.vector()*(-1.0*dt);
-      //clear update vector
-      u_update.vector() *= RangeFieldType(0);
-
-      //add local assemblers
-      systemAssembler.add(inner_assembler, u_intermediate, u_update);
-      systemAssembler.add(boundary_assembler, u_intermediate, u_update);
-
-      //walk the grid
-      systemAssembler.assemble();
-
-      //update u
-//      std::cout << Dune::Stuff::Common::toString(u_update.vector()) << std::endl;
-      u_intermediate.vector() += u_update.vector()*(-1.0*dt);
-
-      u.vector() = 0.5*(u.vector() + u_intermediate.vector());
-
-      // augment time step counter
-      ++time_step_counter;
-
-      // augment time
-      t += dt;
-
-      // check if data should be written
-      if (t >= saveStep)
-      {
-        // write data
-        u.visualize("concentration_" + DSC::toString(save_step_counter), false);
-
-        // increase counter and saveStep for next interval
-        saveStep += saveInterval;
-        ++save_step_counter;
-      }
-
-      // print info about time, timestep size and counter
-      std::cout << "s=" << grid->size(0)
-                << " k=" << time_step_counter << " t=" << t << " dt=" << dt << std::endl;
-    } // while (t < t_end)
+    timestepper.step(t_end, dt, saveInterval);
 
     std::cout << "Finished!!\n";
 
