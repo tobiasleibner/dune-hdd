@@ -94,13 +94,13 @@ public:
     flux_config["variable"] = "u";
     flux_config["expression"] = "[2*u[0] 2*u[0] 2*u[0]]"; //"[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
     flux_config["order"] = "2";
-    flux_config["gradient"] = "[2 2 2]";
+    flux_config["gradient"] = "[2 0 0; 2 0 0; 2 0 0]";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["type"] = SourceType::static_id();
     source_config["variable"] = "u";
-    source_config["expression"] = "[0]";
-    source_config["order"] = "0";
+    source_config["expression"] = "[-1.0/3.0*u[0]]"; //"[0]"; ;
+    source_config["order"] = "1";
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
