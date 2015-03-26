@@ -28,7 +28,7 @@
 #include <dune/gdt/spaces/fv/default.hh>
 #include <dune/gdt/discretefunction/default.hh>
 #include <dune/gdt/operators/projections.hh>
-#include <dune/gdt/operators/hyperbolic.hh>
+#include <dune/gdt/operators/advection.hh>
 
 #include <dune/grid/alugrid/common/declaration.hh>
 
@@ -41,16 +41,16 @@ using namespace Dune::HDD;
 int main()
 {
   try {
-    static const int dimDomain = 3;
+    static const int dimDomain = 1;
     static const int dimRange = 1;
     //choose GridType
-//    typedef Dune::YaspGrid< dimDomain >                                     GridType;
-    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
+    typedef Dune::YaspGrid< dimDomain >                                     GridType;
+//    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
-    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
     typedef typename ProblemType::FunctionType BoundaryValueFunctionType;
     typedef typename ProblemType::ConfigType ConfigType;
     ConfigType problem_config = ProblemType::default_config();
@@ -77,6 +77,7 @@ int main()
 
     //get analytical flux and initial values
     typedef typename ProblemType::FluxType            AnalyticalFluxType;
+    typedef typename ProblemType::SourceType          SourceType;
     typedef typename ProblemType::FunctionType        FunctionType;
     typedef typename FunctionType::DomainFieldType    DomainFieldType;
     typedef typename ProblemType::RangeFieldType      RangeFieldType;
@@ -86,6 +87,7 @@ int main()
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
 //    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create(); //std::make_shared< const IndicatorFunctionType >
 //            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
+    const std::shared_ptr< const SourceType > source = problem.source();
 
     //create grid
     std::cout << "Creating Grid..." << std::endl;
@@ -117,9 +119,9 @@ int main()
     std::cout << "Projecting initial values..." << std::endl;
     project(*initial_values, u);
 
-    const double dt=0.0002;
-    const double saveInterval = 0.0004;
-    const double t_end = 1;
+    const double dt=0.002;
+    const double saveInterval = 0.004;
+    const double t_end = 3;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
@@ -130,18 +132,17 @@ int main()
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
     //create operator
-    typedef typename Dune::GDT::Operators::HyperbolicLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, FVSpaceType > OperatorType;
-    OperatorType lax_friedrichs_operator(analytical_flux, ratio_dt_dx, fv_space);
+    typedef typename Dune::GDT::Operators::AdvectionLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, FVSpaceType > OperatorType;
+    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, fv_space);
 
     //create butcher_array
-//    Dune::FieldMatrix< RangeFieldType, 2, 2 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 2, 2 > >("[0 0; 0 1]"));
+    Dune::FieldMatrix< RangeFieldType, 2, 2 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 2, 2 > >("[0 0; 0 1]"));
 //    const Dune::FieldMatrix< RangeFieldType, 3, 3 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 3, 3 > >("[0 0 0; 0 1 0; 0 0.5 0.5]"));
-    const Dune::FieldMatrix< RangeFieldType, 5, 5 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 5, 5 > >("[0 0 0 0 0; 0.5 0.5 0 0 0; 0.5 0 0.5 0 0; 1 0 0 1 0; 0 " + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
+//    const Dune::FieldMatrix< RangeFieldType, 5, 5 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 5, 5 > >("[0 0 0 0 0; 0.5 0.5 0 0 0; 0.5 0 0.5 0 0; 1 0 0 1 0; 0 " + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 
-//    std::cout << DSC::toString(butcher_array) << std::endl;
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    Dune::Stuff::RungeKuttaTimeStepper< OperatorType, FVFunctionType, 4 > timestepper(lax_friedrichs_operator, butcher_array, u);
+    Dune::Stuff::RungeKuttaTimeStepper< OperatorType, FVFunctionType, SourceType, 1 > timestepper(lax_friedrichs_operator, butcher_array, u, *source);
 
     // now do the time steps
     std::cout << "Starting time loop..." << std::endl;
@@ -152,6 +153,6 @@ int main()
     return 0;
   } catch (Dune::Exception& e) {
     std::cerr << "Dune reported: " << e.what() << std::endl;
-    std::abort;
+    std::abort();
   }
 } // ... main(...)
