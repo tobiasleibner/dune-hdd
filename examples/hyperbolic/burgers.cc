@@ -8,16 +8,16 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <iostream>               // for input/output to shell
+#include <iostream>
 
-#include <dune/common/parallel/mpihelper.hh> // include mpi helper class
+#include <dune/common/parallel/mpihelper.hh>
 
 #include <dune/stuff/common/string.hh>
 #include <dune/stuff/grid/provider/cube.hh>
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
-#include <dune/stuff/playground/timestepper.hh>
+#include <dune/gdt/timestepper/rungekutta.hh>
 
 #include <dune/stuff/playground/functions/indicator.hh>
 
@@ -119,7 +119,7 @@ int main()
     std::cout << "Projecting initial values..." << std::endl;
     project(*initial_values, u);
 
-    const double dt=0.002;
+    const double dt=0.0002;
     const double saveInterval = 0.004;
     const double t_end = 3;
 
@@ -136,17 +136,22 @@ int main()
     OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, fv_space);
 
     //create butcher_array
-    Dune::FieldMatrix< RangeFieldType, 2, 2 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 2, 2 > >("[0 0; 0 1]"));
-//    const Dune::FieldMatrix< RangeFieldType, 3, 3 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 3, 3 > >("[0 0 0; 0 1 0; 0 0.5 0.5]"));
-//    const Dune::FieldMatrix< RangeFieldType, 5, 5 > butcher_array(DSC::fromString< Dune::FieldMatrix< RangeFieldType, 5, 5 > >("[0 0 0 0 0; 0.5 0.5 0 0 0; 0.5 0 0.5 0 0; 1 0 0 1 0; 0 " + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
+    // forward euler
+    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0]"));
+    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[1]"));
+    // generic second order, x = 1 (see https://en.wikipedia.org/wiki/List_of_Runge%E2%80%93Kutta_methods)
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0; 1 0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[0.5 0.5]"));
+    // classic fourth order RK
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0 0 0; 0.5 0 0 0; 0 0.5 0 0; 0 0 1 0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    Dune::Stuff::RungeKuttaTimeStepper< OperatorType, FVFunctionType, SourceType, 1 > timestepper(lax_friedrichs_operator, butcher_array, u, *source);
+    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(lax_friedrichs_operator, u, *source, 0.0, A, b);
 
     // now do the time steps
-    std::cout << "Starting time loop..." << std::endl;
-    timestepper.step(t_end, dt, saveInterval);
+    timestepper.solve(t_end, dt, saveInterval, true);
 
     std::cout << "Finished!!\n";
 
