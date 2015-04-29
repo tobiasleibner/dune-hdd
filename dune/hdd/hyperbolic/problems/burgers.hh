@@ -23,29 +23,25 @@ namespace Hyperbolic {
 namespace Problems {
 
 
-template< class E, class D, int d, class R, int r = 1 >
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
 class Burgers
+  : public Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >
 {
-  Burgers() { static_assert(AlwaysFalse< E >::value, "Not available for these dimensions!"); }
-};
-
-
-template< class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp >
-class Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
-  : public Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
-{
-  typedef Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ThisType;
-  typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > BaseType;
+  typedef Burgers< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > ThisType;
+  typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > BaseType;
 
 public:
-  typedef typename BaseType::DefaultFluxType            DefaultFluxType;
-  typedef typename BaseType::DefaultFunctionType        DefaultFunctionType;
-  typedef typename BaseType::DefaultSourceType          DefaultSourceType;
+  using typename BaseType::DefaultFluxType;
+  using typename BaseType::DefaultFunctionType;
+  using typename BaseType::DefaultSourceType;
 
-  typedef typename BaseType::FluxType                   FluxType;
-  typedef typename BaseType::SourceType                 SourceType;
-  typedef typename BaseType::FunctionType               FunctionType;
-  typedef typename BaseType::ConfigType                 ConfigType;
+  using typename BaseType::FluxType;
+  using typename BaseType::SourceType;
+  using typename BaseType::FunctionType;
+  using typename BaseType::ConfigType;
+
+  using BaseType::dimDomain;
+  using BaseType::dimRange;
 
   static std::string static_id()
   {
@@ -94,16 +90,16 @@ public:
     }
   } // ... default_config(...)
 
-  Burgers(const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "0", 0),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "sin(pi*x[0])", 10),
+  Burgers(const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
+          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]", 10),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "0", 0))
+          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0))
     : BaseType(std::make_shared< DefaultFluxType >("u",
-                                                   std::vector< std::string >(3, "1.0/2.0*u[0]*u[0]"),
+                                                   std::vector< std::string >(dimRange, "1.0/2.0*u[0]*u[0]"),
                                                    2,
                                                    DefaultFluxType::static_id(),
-                                                   std::vector< std::vector< std::string > >{{"u[0]"}, {"u[0]"}, {"u[0]"}}),
+                                                   std::vector< std::vector< std::string > >{{"u[0]", "0", "0"}, {"u[0]", "0", "0"}, {"u[0]", "0", "0"}}),
                source,
                initial_values,
                grid_config,

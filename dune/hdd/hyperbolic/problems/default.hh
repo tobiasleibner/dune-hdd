@@ -21,36 +21,29 @@ namespace Hyperbolic {
 namespace Problems {
 
 
-template< class E, class D, int d, class R, int r = 1 >
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
 class Default
+  : public ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >
 {
-  Default() { static_assert(AlwaysFalse< E >::value, "Not available for these dimensions!"); }
-};
-
-
-template< class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp >
-class Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
-  : public ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
-{
-  typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > BaseType;
-  typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ThisType;
-  static const unsigned int dimRange = 1;
-
-  typedef typename BaseType::FluxSourceEntityType FluxSourceEntityType;
+  typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > BaseType;
+  typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > ThisType;
+  using typename BaseType::FluxSourceEntityType;
 
 public:
+  using BaseType::dimDomain;
+  using BaseType::dimRange;
   typedef typename Dune::Stuff::Functions::Expression
-                < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, domainDim > DefaultFluxType;
+                < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, dimRange, dimDomain > DefaultFluxType;
   typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, domainDim, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
+                < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
   typedef typename Dune::Stuff::Functions::Expression
-                < FluxSourceEntityType, RangeFieldImp, dimRange, DomainFieldImp, 1, 1 > DefaultSourceType;
+                < FluxSourceEntityType, RangeFieldImp, dimRange, DomainFieldImp, dimRange, 1 > DefaultSourceType;
 
-  typedef typename BaseType::FluxType           FluxType;
-  typedef typename BaseType::SourceType         SourceType;
-  typedef typename BaseType::FunctionType       FunctionType;
-  typedef typename BaseType::ConfigType         ConfigType;
-  typedef typename BaseType::RangeFieldType     RangeFieldType;
+  using typename BaseType::FluxType;
+  using typename BaseType::SourceType;
+  using typename BaseType::FunctionType;
+  using typename BaseType::ConfigType;
+  using typename BaseType::RangeFieldType;
 
   typedef typename DefaultFunctionType::DomainType    DomainType;
   typedef typename DefaultFunctionType::RangeType     RangeType;
@@ -60,7 +53,7 @@ public:
     return BaseType::static_id() + ".default";
   }
 
-  std::string type() const
+  std::string type() const override
   {
     return BaseType::type() + ".default";
   }
@@ -70,9 +63,9 @@ protected:
   {
     ConfigType grid_config;
     grid_config["type"] = "provider.cube";
-    grid_config["ll"] = "[0, 0]";
-    grid_config["ur"] = "[1, 1]";
-    grid_config["num_elements"] = "[60 60 60 8]";
+    grid_config["lower_left"] = "[0.0 0.0 0.0 0.0]";
+    grid_config["upper_right"] = "[10.0 1.0 1.0 1.0]";
+    grid_config["num_elements"] = "[1000 100 60 8]";
     return grid_config;
   }
 
@@ -92,26 +85,29 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = FluxType::static_id();
     flux_config["variable"] = "u";
-    flux_config["expression"] = "[2*u[0] 2*u[0] 2*u[0]]"; //"[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
+    flux_config["expression"] = "[u[1] u[1]*u[1]/u[0]+9.81*0.5*u[0]*u[0] 2*u[2]]";
     flux_config["order"] = "2";
-    flux_config["gradient"] = "[2 0 0; 2 0 0; 2 0 0]";
+    flux_config["gradient"] = "[0 1 0; -1*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0] 0; 0 0 2]";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["type"] = SourceType::static_id();
     source_config["variable"] = "u";
-    source_config["expression"] = "[-1.0/3.0*u[0]]"; //"[0]"; ;
+    source_config["expression"] = "[0 0 0]";
     source_config["order"] = "1";
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
     initial_value_config["variable"] = "x";
-    initial_value_config["expression"] = "[sin(pi*x[0])]"; //"1.0/40.0*exp(1-(2*pi*x[0] - pi)*(2*pi*x[0] - pi) - (2*pi*x[1] - pi)*(2*pi*x[1] - pi))";
+//    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";                                  // simple sine wave
+//    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
+    initial_value_config["expression"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
+//    initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values");
     ConfigType boundary_value_config = DefaultFunctionType::default_config();
     boundary_value_config["type"] = DefaultFunctionType::static_id();
     boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = "[x[0]]";
+    boundary_value_config["expression"] = "[0 0 0]";
     boundary_value_config["order"] = "1";
     config.add(boundary_value_config, "boundary_values");
     if (sub_name.empty())
@@ -138,11 +134,11 @@ public:
   } // ... create(...)
 
   Default(const std::shared_ptr< const FluxType > flux,
-          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "0", 0),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "sin(pi*x[0])", 10),
+          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
+          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]", 10),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "0", 0))
+          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0))
     : flux_(flux)
     , source_(source)
     , initial_values_(initial_values)

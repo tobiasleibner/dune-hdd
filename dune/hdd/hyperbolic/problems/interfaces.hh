@@ -20,37 +20,26 @@ namespace HDD {
 namespace Hyperbolic {
 
 
-template < class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp, int rangeDim >
-class ProblemInterface
-{
-public:
-  ProblemInterface()
-  {
-    DUNE_THROW(Dune::NotImplemented, "Not implemented for rangeDim != 1");
-  }
-};
-
-
 /* Interface for problem of the form delta_t u + div f(u) = q(u) where u: R^d \to R.
  * The flux f is a function f: R \to R^d, and q: R \to R is a source. */
-template< class EntityImp, class DomainFieldImp, int domainDim, class RangeFieldImp>
-class ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 >
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
+class ProblemInterface
 {
-  typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, 1 > ThisType;
+  typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > ThisType;
 public:
   typedef EntityImp         EntityType;
   typedef DomainFieldImp    DomainFieldType;
-  static const unsigned int dimDomain = domainDim;
+  static const size_t dimDomain = domainDim;
   typedef RangeFieldImp     RangeFieldType;
-  static const unsigned int dimRange = 1;
+  static const size_t dimRange = rangeDim;
 
 //  we do not have a grid for the range space, but still need an EntityType with dimension dimRange for FluxType and
 //  SourceType, so just choose an arbitrary one
   typedef typename Dune::YaspGrid< dimRange >::template Codim< 0 >::Entity           FluxSourceEntityType;
-  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimDomain > FluxType;
-  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, 1 >         SourceType; // depends on u
+  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimRange, dimDomain > FluxType;
+  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimRange >         SourceType; // depends on u
 //  typedef Dune::Stuff::LocalizableFunctionInterface
-//      < EntityType, DomainFieldType, 1, RangeFieldType, 1 >          SourceType; // depends on x
+//      < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >          SourceType; // depends on x
   typedef Dune::Stuff::LocalizableFunctionInterface
       < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >  FunctionType;
   typedef Dune::Stuff::Common::Configuration                                ConfigType;
