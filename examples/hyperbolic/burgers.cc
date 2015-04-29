@@ -17,8 +17,6 @@
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
-#include <dune/gdt/timestepper/rungekutta.hh>
-
 #include <dune/stuff/playground/functions/indicator.hh>
 
 #include <dune/gdt/assembler/local/codim1.hh>
@@ -26,11 +24,15 @@
 #include <dune/gdt/localoperator/codim1.hh>
 #include <dune/gdt/localevaluation/laxfriedrichs.hh>
 #include <dune/gdt/spaces/fv/default.hh>
+#include <dune/gdt/spaces/fv/defaultproduct.hh>
 #include <dune/gdt/discretefunction/default.hh>
 #include <dune/gdt/operators/projections.hh>
 #include <dune/gdt/operators/advection.hh>
+#include <dune/gdt/timestepper/rungekutta.hh>
 
-#include <dune/grid/alugrid/common/declaration.hh>
+#if HAVE_ALUGRID
+# include <dune/grid/alugrid.hh>
+#endif
 
 #include <dune/hdd/hyperbolic/problems/burgers.hh>
 #include <dune/hdd/hyperbolic/problems/default.hh>
@@ -41,11 +43,12 @@ using namespace Dune::HDD;
 int main()
 {
   try {
-    static const int dimDomain = 1;
-    static const int dimRange = 1;
+    static const size_t dimDomain = 1;
+    static const size_t dimRange = 2;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
 //    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
+//    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::cube, Dune::nonconforming >      GridType;
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
@@ -57,13 +60,14 @@ int main()
     //set boundary type ("periodic" or "dirichlet")
     ConfigType boundary_config;
 //    boundary_config["type"] = "dirichlet";
-    boundary_config["type"] = "periodic";
+//    boundary_config["type"] = "periodic";
+    boundary_config["type"] = "absorbing";
     problem_config.add(boundary_config, "boundary_info", true);
     //set boundary values (ignored if boundary is periodic)
     ConfigType boundary_value_config = ProblemType::DefaultFunctionType::default_config();
     boundary_value_config["type"] = ProblemType::DefaultFunctionType::static_id();
     boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = "x[0]";
+    boundary_value_config["expression"] = "[x[0] x[0] x[0]";
     boundary_value_config["order"] = "1";
     problem_config.add(boundary_value_config, "boundary_values", true);
 
@@ -85,14 +89,14 @@ int main()
     typedef typename IndicatorFunctionType::DomainType DomainType;
     const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
-//    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create(); //std::make_shared< const IndicatorFunctionType >
-//            (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
+//    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create();   // Indicator with value 1 on [0.25,0.75]
+//    std::make_shared< const IndicatorFunctionType > (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
     const std::shared_ptr< const SourceType > source = problem.source();
 
     //create grid
     std::cout << "Creating Grid..." << std::endl;
     typedef Dune::Stuff::Grid::Providers::Cube< GridType >  GridProviderType;
-    GridProviderType grid_provider = *(GridProviderType::create(grid_config, "grid"));
+    GridProviderType grid_provider = *(GridProviderType::create(grid_config));
     const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
 
     // make a finite volume space on the leaf grid
@@ -101,7 +105,8 @@ int main()
     const GridViewType grid_view = grid->leafGridView();
     const GridViewType& grid_view_ref = grid_view;
     typedef typename Dune::Stuff::Grid::PeriodicGridView< GridViewType >        PeriodicGridViewType;
-    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
+//    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
+    typedef Spaces::FV::DefaultProduct< PeriodicGridViewType, RangeFieldType, dimRange >      FVSpaceType;
     std::bitset< dimDomain > periodic_directions;
     if (problem.boundary_info()["type"] == "periodic")
       periodic_directions.set();
@@ -109,6 +114,7 @@ int main()
     const PeriodicGridViewType periodic_grid_view(grid_view_ref, periodic_directions);
     std::cout << "Creating FiniteVolumeSpace..." << std::endl;
     const FVSpaceType fv_space(periodic_grid_view);
+
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
     std::cout << "Allocating discrete functions..." << std::endl;
@@ -119,17 +125,15 @@ int main()
     std::cout << "Projecting initial values..." << std::endl;
     project(*initial_values, u);
 
-    const double dt=0.0002;
-    const double saveInterval = 0.004;
-    const double t_end = 3;
+    double dt=0.4;
+    const double t_end = 2;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > ConstantFunctionType;
+    typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     ConstantFunctionType ratio_dt_dx(dt/dx);
-    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
     //create operator
     typedef typename Dune::GDT::Operators::AdvectionLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, FVSpaceType > OperatorType;
@@ -150,6 +154,14 @@ int main()
     std::cout << "Creating TimeStepper..." << std::endl;
     Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(lax_friedrichs_operator, u, *source, 0.0, A, b);
 
+    //search suitable time step length
+    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
+    while (!(dtpair.first)) {
+      dtpair = timestepper.find_suitable_dt(dt, 2, 2, 200);
+      dt = dtpair.second;
+    }
+    std::cout <<" dt/dx: "<< dt/dx << std::endl;
+    const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
     // now do the time steps
     timestepper.solve(t_end, dt, saveInterval, true);
 
