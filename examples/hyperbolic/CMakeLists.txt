@@ -6,13 +6,23 @@
 add_library(dunehdd-hyperbolic-burgers
             STATIC
             "burgers.cc")
+add_library(dunehdd-hyperbolic-twobeams
+            STATIC
+            "twobeams.cc")
 
 ADD_EXECUTABLE(example_hyperbolic_burgers "burgers.cc" ${COMMON_HEADER})
+ADD_EXECUTABLE(example_hyperbolic_twobeams "twobeams.cc" ${COMMON_HEADER})
+
 TARGET_LINK_LIBRARIES(example_hyperbolic_burgers
+                      ${COMMON_LIBS} ${Boost_FILESYSTEM_LIBRARY})
+TARGET_LINK_LIBRARIES(example_hyperbolic_twobeams
                       ${COMMON_LIBS} ${Boost_FILESYSTEM_LIBRARY})
 
 add_dune_alugrid_flags(example_hyperbolic_burgers)
+add_dune_alugrid_flags(example_hyperbolic_twobeams)
 
 add_dune_superlu_flags(example_hyperbolic_burgers)
+add_dune_superlu_flags(example_hyperbolic_twobeams)
 
 add_dune_tbb_flags(example_hyperbolic_burgers)
+add_dune_tbb_flags(example_hyperbolic_twobeams)

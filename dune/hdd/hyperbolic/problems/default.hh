@@ -27,6 +27,7 @@ class Default
 {
   typedef ProblemInterface< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > BaseType;
   typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > ThisType;
+protected:
   using typename BaseType::FluxSourceEntityType;
 
 public:
