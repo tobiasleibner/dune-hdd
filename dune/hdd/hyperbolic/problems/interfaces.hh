@@ -42,7 +42,9 @@ public:
 //      < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >          SourceType; // depends on x
   typedef Dune::Stuff::LocalizableFunctionInterface
       < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >  FunctionType;
-  typedef Dune::Stuff::Common::Configuration                                ConfigType;
+  typedef typename Dune::Stuff::Functions::TimeDependentExpression
+                < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1, double > BoundaryValueType;
+  typedef Dune::Stuff::Common::Configuration                                    ConfigType;
 
   virtual ~ProblemInterface() {}
 
@@ -66,7 +68,7 @@ public:
 
   virtual const ConfigType boundary_info() const = 0;
 
-  virtual const std::shared_ptr< const FunctionType >& boundary_values() const = 0;
+  virtual const std::shared_ptr< const BoundaryValueType >& boundary_values() const = 0;
 
   template< class G >
   void visualize(/*const GridView< G >& grid_view, std::string filename, other types*/) const

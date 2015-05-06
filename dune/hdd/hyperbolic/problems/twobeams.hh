@@ -44,10 +44,12 @@ public:
                                                                  dimDomain >              DefaultFluxType;
   using typename BaseType::DefaultFunctionType;
   using typename BaseType::DefaultSourceType;
+  using typename BaseType::DefaultBoundaryValueType;
 
   using typename BaseType::FluxType;
   using typename BaseType::SourceType;
   using typename BaseType::FunctionType;
+  using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
 
   static std::string static_id()
@@ -162,7 +164,7 @@ public:
     const std::shared_ptr< const DefaultFunctionType > initial_values(DefaultFunctionType::create(config.sub("initial_values")));
     const ConfigType grid_config = config.sub("grid");
     const ConfigType boundary_info = config.sub("boundary_info");
-    const std::shared_ptr< const DefaultFunctionType > boundary_values(DefaultFunctionType::create(config.sub("boundary_values")));
+    const std::shared_ptr< const DefaultBoundaryValueType > boundary_values(DefaultBoundaryValueType::create(config.sub("boundary_values")));
     return Stuff::Common::make_unique< ThisType >(flux, source, initial_values,
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
@@ -188,8 +190,8 @@ public:
     initial_value_config["expression"] = CreateInitialValues< dimRange >::value_str();
     initial_value_config["order"] = "0";
     config.add(initial_value_config, "initial_values");
-    ConfigType boundary_value_config = DefaultFunctionType::default_config();
-    boundary_value_config["type"] = DefaultFunctionType::static_id();
+    ConfigType boundary_value_config = BoundaryValueType::default_config();
+    boundary_value_config["type"] = BoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";
     boundary_value_config["expression"] = CreateBoundaryValues< dimRange >::value_str();
     boundary_value_config["order"] = "10";
@@ -208,7 +210,7 @@ public:
            const std::shared_ptr< const FunctionType > initial_values,
            const ConfigType& grid_config,
            const ConfigType& boundary_info,
-           const std::shared_ptr< const FunctionType > boundary_values)
+           const std::shared_ptr< const BoundaryValueType > boundary_values)
     : BaseType(flux,
                source,
                initial_values,

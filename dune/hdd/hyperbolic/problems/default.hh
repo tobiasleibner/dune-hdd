@@ -37,12 +37,14 @@ public:
                 < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, dimRange, dimDomain > DefaultFluxType;
   typedef typename Dune::Stuff::Functions::Expression
                 < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
+  typedef typename BaseType::BoundaryValueType                                       DefaultBoundaryValueType;
   typedef typename Dune::Stuff::Functions::Expression
                 < FluxSourceEntityType, RangeFieldImp, dimRange, DomainFieldImp, dimRange, 1 > DefaultSourceType;
 
   using typename BaseType::FluxType;
   using typename BaseType::SourceType;
   using typename BaseType::FunctionType;
+  using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
   using typename BaseType::RangeFieldType;
 
@@ -65,8 +67,8 @@ protected:
     ConfigType grid_config;
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0 0.0 0.0 0.0]";
-    grid_config["upper_right"] = "[10.0 1.0 1.0 1.0]";
-    grid_config["num_elements"] = "[1000 100 60 8]";
+    grid_config["upper_right"] = "[1.0 1.0 1.0 1.0]";
+    grid_config["num_elements"] = "[100 100 60 8]";
     return grid_config;
   }
 
@@ -99,9 +101,9 @@ public:
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
     initial_value_config["variable"] = "x";
-//    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";                                  // simple sine wave
+    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";                                  // simple sine wave
 //    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
-    initial_value_config["expression"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
+//    initial_value_config["expression"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
 //    initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values");
@@ -129,7 +131,7 @@ public:
     const std::shared_ptr< const DefaultFunctionType > initial_values(DefaultFunctionType::create(config.sub("initial_values")));
     const ConfigType grid_config = config.sub("grid");
     const ConfigType boundary_info = config.sub("boundary_info");
-    const std::shared_ptr< const DefaultFunctionType > boundary_values(DefaultFunctionType::create(config.sub("boundary_values")));
+    const std::shared_ptr< const DefaultBoundaryValueType > boundary_values(DefaultBoundaryValueType::create(config.sub("boundary_values")));
     return Stuff::Common::make_unique< ThisType >(flux, source, initial_values,
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
@@ -139,7 +141,7 @@ public:
           const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]", 10),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0))
+          const std::shared_ptr< const DefaultBoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >("x", "[0 0 0]", 0))
     : flux_(flux)
     , source_(source)
     , initial_values_(initial_values)
@@ -173,7 +175,7 @@ public:
     return boundary_info_;
   }
 
-  virtual const std::shared_ptr< const FunctionType >& boundary_values() const override
+  virtual const std::shared_ptr< const BoundaryValueType >& boundary_values() const override
   {
     return boundary_values_;
   }
@@ -184,7 +186,7 @@ private:
   const std::shared_ptr< const FunctionType >       initial_values_;
   const ConfigType                                  grid_config_;
   const ConfigType                                  boundary_info_;
-  const std::shared_ptr< const FunctionType >       boundary_values_;
+  const std::shared_ptr< const BoundaryValueType >  boundary_values_;
 };
 
 } // namespace Problems
