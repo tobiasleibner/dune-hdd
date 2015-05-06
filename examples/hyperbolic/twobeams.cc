@@ -25,6 +25,7 @@
 #include <dune/gdt/timestepper/rungekutta.hh>
 
 #include <dune/hdd/hyperbolic/problems/twobeams.hh>
+#include <dune/hdd/hyperbolic/problems/twopulses.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -33,13 +34,14 @@ int main()
 {
   try {
     static const size_t dimDomain = 1;
-    static const size_t dimRange = 50;
+    static const size_t dimRange = 51;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
-    typedef typename GridType::Codim< 0 >::Entity           EntityType;
+    typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
-    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
 
     //create Problem
     const auto problem_ptr = ProblemType::create();
@@ -52,11 +54,12 @@ int main()
     typedef typename ProblemType::FluxType              AnalyticalFluxType;
     typedef typename ProblemType::SourceType            SourceType;
     typedef typename ProblemType::FunctionType          FunctionType;
+    typedef typename ProblemType::BoundaryValueType     BoundaryValueType;
     typedef typename FunctionType::DomainFieldType      DomainFieldType;
     typedef typename ProblemType::RangeFieldType        RangeFieldType;
     const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
-    const std::shared_ptr< const FunctionType > boundary_values = problem.boundary_values();
+    const std::shared_ptr< const BoundaryValueType > boundary_values = problem.boundary_values();
     const std::shared_ptr< const SourceType > source = problem.source();
 
     //create grid
@@ -85,7 +88,7 @@ int main()
 
     //choose initial time step length and end time
     double dt = 0.4;
-    const double t_end = 4;
+    const double t_end = 7;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
@@ -95,8 +98,8 @@ int main()
     ConstantFunctionType ratio_dt_dx(dt/dx);
 
     //create operator
-    typedef typename Dune::GDT::Operators::AdvectionLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, FunctionType, FVSpaceType > OperatorType;
-    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space);
+    typedef typename Dune::GDT::Operators::AdvectionGodunov< AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType > OperatorType;
+    OperatorType advection_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space, true);
 
     //create butcher_array
     // forward euler
@@ -111,7 +114,7 @@ int main()
 
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(lax_friedrichs_operator, u, *source, 0.0, A, b);
+    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, 0.0, A, b);
 
     //search suitable time step length
     std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
