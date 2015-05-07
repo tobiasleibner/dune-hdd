@@ -26,6 +26,8 @@
 
 #include <dune/hdd/hyperbolic/problems/twobeams.hh>
 #include <dune/hdd/hyperbolic/problems/twopulses.hh>
+#include <dune/hdd/hyperbolic/problems/rectangularic.hh>
+#include <dune/hdd/hyperbolic/problems/sourcebeam.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -34,15 +36,18 @@ int main()
 {
   try {
     static const size_t dimDomain = 1;
-    static const size_t dimRange = 51;
+    // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
+    // clang 3.5). You need to pass -ftemplate-depth=N with N >= dimRange + 5 to clang for higher dimRange.
+    static const size_t dimRange = 22;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
 //    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
-
+//    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
     //create Problem
     const auto problem_ptr = ProblemType::create();
     const auto& problem = *problem_ptr;
