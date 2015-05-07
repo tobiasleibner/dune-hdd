@@ -10,12 +10,7 @@
 #include <vector>
 #include <string>
 
-#include <dune/common/static_assert.hh>
-
 #include <dune/stuff/common/string.hh>
-#include <dune/stuff/functions/constant.hh>
-#include <dune/stuff/functions/expression.hh>
-#include <dune/stuff/functions/linear.hh>
 
 #include "twobeams.hh"
 
@@ -127,11 +122,14 @@ public:
     ConfigType config = BaseType::default_config();
     config.add(default_grid_config(), "grid", true);
     ConfigType source_config = DefaultSourceType::default_config();
-    source_config["type"] = SourceType::static_id();
+    source_config["lower_left"] = "[0.0]";
+    source_config["upper_right"] = "[7.0]";
+    source_config["num_elements"] = "[1]";
     source_config["variable"] = "u";
-    source_config["expression"] = CreateSource< dimRange >::value_str();
-    source_config["order"] = "1";
-    config.add(source_config, "source");
+    source_config["values"] = CreateSource< dimRange >::value_str();
+    source_config["values_are_vectors"] = "true";
+    source_config["name"] = static_id();
+    config.add(source_config, "source", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";

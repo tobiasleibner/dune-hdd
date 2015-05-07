@@ -155,10 +155,13 @@ public:
     ConfigType config = BaseType::default_config();
     config.add(default_grid_config(), "grid", true);
     ConfigType source_config = DefaultSourceType::default_config();
-    source_config["type"] = SourceType::static_id();
+    source_config["lower_left"] = "[0.0]";
+    source_config["upper_right"] = "[7.0]";
+    source_config["num_elements"] = "[1]";
     source_config["variable"] = "u";
-    source_config["expression"] = CreateSource< dimRange >::value_str();
-    source_config["order"] = "1";
+    source_config["values"] = CreateSource< dimRange >::value_str();
+    source_config["values_are_vectors"] = "true";
+    source_config["name"] = static_id();
     config.add(source_config, "source", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["lower_left"] = "[0.0]";

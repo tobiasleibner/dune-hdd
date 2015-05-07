@@ -10,11 +10,7 @@
 #include <vector>
 #include <string>
 
-#include <dune/common/static_assert.hh>
-
 #include <dune/stuff/common/string.hh>
-#include <dune/stuff/functions/constant.hh>
-#include <dune/stuff/functions/expression.hh>
 #include <dune/stuff/functions/linear.hh>
 
 #include "default.hh"
@@ -179,10 +175,13 @@ public:
     flux_config["matrix"] = CreateMatrix< dimRange >::value_str();
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
-    source_config["type"] = SourceType::static_id();
+    source_config["lower_left"] = "[0.0]";
+    source_config["upper_right"] = "[1.0]";
+    source_config["num_elements"] = "[1]";
     source_config["variable"] = "u";
-    source_config["expression"] = CreateSource< dimRange >::value_str();
-    source_config["order"] = "1";
+    source_config["values"] = CreateSource< dimRange >::value_str();
+    source_config["values_are_vectors"] = "true";
+    source_config["name"] = static_id();
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();

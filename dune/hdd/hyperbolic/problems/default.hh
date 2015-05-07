@@ -10,8 +10,8 @@
 
 #include <dune/common/static_assert.hh>
 
-#include <dune/stuff/functions/constant.hh>
 #include <dune/stuff/functions/expression.hh>
+#include <dune/stuff/functions/checkerboard.hh>
 
 #include "interfaces.hh"
 
@@ -38,8 +38,6 @@ public:
   typedef typename Dune::Stuff::Functions::Expression
                 < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
   typedef typename BaseType::BoundaryValueType                                       DefaultBoundaryValueType;
-  typedef typename Dune::Stuff::Functions::Expression
-                < FluxSourceEntityType, RangeFieldImp, dimRange, DomainFieldImp, dimRange, 1 > DefaultSourceType;
 
   using typename BaseType::FluxType;
   using typename BaseType::SourceType;
@@ -47,6 +45,10 @@ public:
   using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
   using typename BaseType::RangeFieldType;
+
+  typedef typename Dune::Stuff::Functions::ExpressionCheckerboard< EntityImp, DomainFieldImp, dimDomain,
+                                                                   FluxSourceEntityType, RangeFieldImp, dimRange,
+                                                                   RangeFieldImp, dimRange, 1 >    DefaultSourceType;
 
   typedef typename DefaultFunctionType::DomainType    DomainType;
   typedef typename DefaultFunctionType::RangeType     RangeType;
@@ -93,10 +95,13 @@ public:
     flux_config["gradient"] = "[0 1 0; -1*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0] 0; 0 0 2]";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
-    source_config["type"] = SourceType::static_id();
+    source_config["lower_left"] = "[0.0 0.0 0.0]";
+    source_config["upper_right"] = "[1.0 1.0 1.0]";
+    source_config["num_elements"] = "[1 1 1]";
     source_config["variable"] = "u";
-    source_config["expression"] = "[0 0 0]";
-    source_config["order"] = "1";
+    source_config["values"] = "[0]";
+    source_config["values_are_vectors"] = "false";
+    source_config["name"] = static_id();
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();

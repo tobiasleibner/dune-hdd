@@ -14,6 +14,7 @@
 #include <dune/stuff/common/exceptions.hh>
 #include <dune/stuff/functions/default.hh>
 #include <dune/stuff/functions/expression.hh>
+#include <dune/stuff/functions/checkerboard.hh>
 
 namespace Dune {
 namespace HDD {
@@ -37,9 +38,9 @@ public:
 //  SourceType, so just choose an arbitrary one
   typedef typename Dune::YaspGrid< dimRange >::template Codim< 0 >::Entity           FluxSourceEntityType;
   typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimRange, dimDomain > FluxType;
-  typedef Dune::Stuff::GlobalFunctionInterface< FluxSourceEntityType, RangeFieldType, dimRange, RangeFieldType, dimRange >         SourceType; // depends on u
-//  typedef Dune::Stuff::LocalizableFunctionInterface
-//      < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >          SourceType; // depends on x
+  typedef Dune::Stuff::GlobalFunctionValuedFunctionInterface< EntityType, DomainFieldType, dimDomain,
+                                                              FluxSourceEntityType, RangeFieldType, dimRange,
+                                                              RangeFieldType, dimRange, 1 >             SourceType;
   typedef Dune::Stuff::LocalizableFunctionInterface
       < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >  FunctionType;
   typedef typename Dune::Stuff::Functions::TimeDependentExpression
