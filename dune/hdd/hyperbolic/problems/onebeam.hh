@@ -61,86 +61,16 @@ public:
     return BaseType::type() + ".onebeam";
   }
 private:
-  static double factorial(size_t n)
-  {
-      return (n == 1 || n == 0) ? 1 : factorial(n - 1)*n;
+  // precalculated boundary values, for n > 30, the boundary value is less than 1e-28 and thus set to 0;
+  static const std::vector< RangeFieldImp > left_boundary_values_;
+
+  static RangeFieldImp get_left_boundary_value(const size_t n) {
+    if (n <= 30) {
+      return left_boundary_values_[n];
+    } else {
+      return 0.0;
+    }
   }
-
-
-//! compute integral of function over entity with given order
-template<class Entity, class Function>
-static double integrateEntity (const Entity &entity, const Function &f, int p)
-{
-  // dimension of the entity
-  const int dim = Entity::dimension;
-
-  // type used for coordinates in the grid
-  typedef typename Entity::Geometry::ctype ctype;
-
-  // get geometry
-  const typename Entity::Geometry geometry = entity.geometry();
-
-  // get geometry type
-  const Dune::GeometryType gt = geometry.type();
-
-  // get quadrature rule of order p
-  const Dune::QuadratureRule<ctype,dim>&
-  rule = Dune::QuadratureRules<ctype,dim>::rule(gt,p);     /*@\label{ieh:qr}@*/
-
-  // ensure that rule has at least the requested order
-  if (rule.order()<p)
-    DUNE_THROW(Dune::Exception,"order not available");
-
-  // compute approximate integral
-  double result=0;
-  for (typename Dune::QuadratureRule<ctype,dim>::const_iterator i=rule.begin();
-       i!=rule.end(); ++i)
-  {
-    // we do not integrate from -1 to 1, but from 0 to 1, so evaluate at 2*x - 1 and multiply by 2
-    double fval = 2*f.evaluate(2*geometry.global(i->position()) - 1);       /*@\label{ieh:fval}@*/
-    double weight = i->weight();                        /*@\label{ieh:weight}@*/
-    double detjac = geometry.integrationElement(i->position());       /*@\label{ieh:detjac}@*/
-    result += fval * weight * detjac;                   /*@\label{ieh:result}@*/
-  }
-
-  // return result
-  return result;
-}
-
-static std::string create_legendre_polynomial(const size_t n)
-{
-  std::string str;
-  for (size_t kk = 0; kk <= n/2.0; ++kk) {
-    if (kk == 0)
-      str += DSC::toString(factorial(2*n)/(factorial(n)*factorial(n)*std::pow(2,n))) + "*((m[0])^" + DSC::toString(n) + ")";
-    else
-    str += "+(" + DSC::toString(std::pow(-1.0, kk)*factorial(2*n - 2*kk)) + ")/(" + DSC::toString(factorial(n-kk)*factorial(n-2*kk)*factorial(kk)*std::pow(2,n)) + ")" + "*((m[0])^" + DSC::toString(n - 2*kk) + ")";
-  }
-  std::cout << "legendre " << n << ": " << str << std::endl;
-  return str;
-}
-
-static RangeFieldImp get_left_boundary_value(const size_t n) {
-      typedef Dune::YaspGrid< dimDomain >                     GridType;
-      typedef Dune::Stuff::Grid::Providers::Cube< GridType >  GridProviderType;
-      ConfigType grid_config;
-      grid_config["type"] = "provider.cube";
-      grid_config["lower_left"] = "[0.0]";
-      grid_config["upper_right"] = "[1.0]";
-      grid_config["num_elements"] = "[1]";
-      GridProviderType grid_provider = *(GridProviderType::create(grid_config));
-      const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
-      const auto it = grid->template leafbegin< 0 >();
-      const auto& entity = *it;
-      typedef typename GridType::template Codim< 0 >::Entity VelocityEntityType;
-      const std::string integrand_string = "(" + create_legendre_polynomial(n) + ")*3*exp(3*m[0]+3)/(exp(6)-1)";
-      typedef typename Dune::Stuff::Functions::Expression
-                    < VelocityEntityType, DomainFieldImp, 1, RangeFieldImp, 1, 1 > IntegrandType;
-      const IntegrandType integrand("m", integrand_string);
-      // highest possible quadrature order is 60
-      return integrateEntity(entity, integrand, 60);
-}
-
 
   // sigma_a = 10 if 0.4 <= x <= 0.7, 0 else
   // T = Q = 0
@@ -168,8 +98,6 @@ static RangeFieldImp get_left_boundary_value(const size_t n) {
       return str;
     }
   };
-
-
 
   // boundary value has to be (l-th component) int_{-1}^1 3*exp(3*m + 3)/(exp(6) - 1) * P_l(m) dm at x = 0 and [0.0002 0 0 ... ] at x = 1
   template< size_t N >
@@ -264,7 +192,41 @@ public:
                boundary_info,
                boundary_values)
   {}
-};
+}; // class OneBeam
+
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
+const std::vector< RangeFieldImp >
+OneBeam< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::left_boundary_values_ = {1.0,
+                                                                                                  6.71636489980355855245e-01,
+                                                                                                  3.28363510019644144755e-01,
+                                                                                                  1.24363973280948905686e-01,
+                                                                                                  3.81809056974300592424e-02,
+                                                                                                  9.82125618865871928553e-03,
+                                                                                                  2.16963300568142518701e-03,
+                                                                                                  4.19513164039210756200e-04,
+                                                                                                  7.20671854853712433829e-05,
+                                                                                                  1.11324462887737092337e-05,
+                                                                                                  1.56169232313775636906e-06,
+                                                                                                  2.00600026809414359175e-07,
+                                                                                                  2.37587842655794863414e-08,
+                                                                                                  2.61015792958530426248e-09,
+                                                                                                  2.67362899311749478277e-10,
+                                                                                                  2.56499029050593908917e-11,
+                                                                                                  2.31390262613575206647e-12,
+                                                                                                  1.96974017566116948835e-13,
+                                                                                                  1.58724211977210871905e-14,
+                                                                                                  1.21415612755686868581e-15,
+                                                                                                  8.83915394817958527742e-17,
+                                                                                                  6.13842130565872485602e-18,
+                                                                                                  4.07500767354120497201e-19,
+                                                                                                  2.59097953469175454498e-20,
+                                                                                                  1.58064025241231349219e-21,
+                                                                                                  9.26712241830912425052e-23,
+                                                                                                  5.22944129976226306897e-24,
+                                                                                                  2.84427887291271140280e-25,
+                                                                                                  1.49300327556249155579e-26,
+                                                                                                  7.57264934397747012074e-28,
+                                                                                                  3.71557124692250023583e-29};
 
 } // namespace Problems
 } // namespace Hyperbolic

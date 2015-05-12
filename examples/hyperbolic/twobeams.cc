@@ -39,8 +39,6 @@ int main()
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N >= dimRange + 5 to clang for higher dimRange.
-    // for OneBeam, dimRange > 40 leads to problems with the numerical integration of the boundary values
-    // ToDo: precompute boundary values precise enough
     static const size_t dimRange = 42;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
