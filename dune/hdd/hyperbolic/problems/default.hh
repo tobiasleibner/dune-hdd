@@ -68,9 +68,9 @@ protected:
   {
     ConfigType grid_config;
     grid_config["type"] = "provider.cube";
-    grid_config["lower_left"] = "[0.0 0.0 0.0 0.0]";
-    grid_config["upper_right"] = "[1.0 1.0 1.0 1.0]";
-    grid_config["num_elements"] = "[100 100 60 8]";
+    grid_config["lower_left"] = "[0.0 0.0 0.0]";
+    grid_config["upper_right"] = "[1.0 1.0 1.0]";
+    grid_config["num_elements"] = "[60 60 60]";
     return grid_config;
   }
 
@@ -90,9 +90,9 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = FluxType::static_id();
     flux_config["variable"] = "u";
-    flux_config["expression"] = "[u[1] u[1]*u[1]/u[0]+9.81*0.5*u[0]*u[0] 2*u[2]]";
-    flux_config["order"] = "2";
-    flux_config["gradient"] = "[0 1 0; -1*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0] 0; 0 0 2]";
+    flux_config["expression"] = "[0 0 0]";
+    flux_config["order"] = "0";
+    flux_config["gradient"] = "[0 0 0; 0 0 0; 0 0 0]";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0 0.0 0.0]";
@@ -106,11 +106,8 @@ public:
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
     initial_value_config["variable"] = "x";
-    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";                                  // simple sine wave
-//    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
-//    initial_value_config["expression"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
-//    initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
-    initial_value_config["order"] = "10";
+    initial_value_config["expression"] = "[0 0 0]";
+    initial_value_config["order"] = "0";
     config.add(initial_value_config, "initial_values");
     ConfigType boundary_value_config = DefaultFunctionType::default_config();
     boundary_value_config["type"] = DefaultFunctionType::static_id();
@@ -143,7 +140,7 @@ public:
 
   Default(const std::shared_ptr< const FluxType > flux,
           const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]", 10),
+          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
           const std::shared_ptr< const DefaultBoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >("x", "[0 0 0]", 0))
