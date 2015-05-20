@@ -12,9 +12,6 @@
 
 #include <dune/common/static_assert.hh>
 
-#include <dune/stuff/functions/constant.hh>
-#include <dune/stuff/functions/expression.hh>
-
 #include "default.hh"
 
 namespace Dune {
@@ -34,10 +31,12 @@ public:
   using typename BaseType::DefaultFluxType;
   using typename BaseType::DefaultFunctionType;
   using typename BaseType::DefaultSourceType;
+  using typename BaseType::DefaultBoundaryValueType;
 
   using typename BaseType::FluxType;
   using typename BaseType::SourceType;
   using typename BaseType::FunctionType;
+  using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
 
   using BaseType::dimDomain;
@@ -54,20 +53,35 @@ public:
   }
 
 protected:
-  using BaseType::default_grid_config;
-  using BaseType::default_boundary_info_config;
+  static ConfigType default_grid_config()
+  {
+    ConfigType grid_config;
+    grid_config["type"] = "provider.cube";
+    grid_config["lower_left"] = "[0.0 0.0 0.0]";
+    grid_config["upper_right"] = "[1.0 1.0 1.0]";
+    grid_config["num_elements"] = "[60 60 60]";
+    return grid_config;
+  }
+
+  static ConfigType default_boundary_info_config()
+  {
+    ConfigType boundary_config;
+    boundary_config["type"] = "periodic";
+    return boundary_config;
+  }
 
 public:
   static std::unique_ptr< ThisType > create(const ConfigType cfg = default_config(),
                                             const std::string sub_name = static_id())
   {
     const ConfigType config = cfg.has_sub(sub_name) ? cfg.sub(sub_name) : cfg;
+    const std::shared_ptr< const DefaultFluxType > flux(DefaultFluxType::create(config.sub("flux")));
     const std::shared_ptr< const DefaultSourceType > source(DefaultSourceType::create(config.sub("source")));
     const std::shared_ptr< const DefaultFunctionType > initial_values(DefaultFunctionType::create(config.sub("initial_values")));
     const ConfigType grid_config = config.sub("grid");
     const ConfigType boundary_info = config.sub("boundary_info");
-    const std::shared_ptr< const DefaultFunctionType > boundary_values(DefaultFunctionType::create(config.sub("boundary_values")));
-    return Stuff::Common::make_unique< ThisType >(source, initial_values,
+    const std::shared_ptr< const DefaultBoundaryValueType > boundary_values(DefaultBoundaryValueType::create(config.sub("boundary_values")));
+    return Stuff::Common::make_unique< ThisType >(flux, source, initial_values,
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
@@ -81,6 +95,14 @@ public:
     flux_config["order"] = "2";
     flux_config["gradient"] = "[u[0] 0 0; u[0] 0 0; u[0] 0 0]";
     config.add(flux_config, "flux", true);
+    ConfigType initial_value_config = DefaultFunctionType::default_config();
+    initial_value_config["type"] = DefaultFunctionType::static_id();
+    initial_value_config["variable"] = "x";
+//    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
+//    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
+    initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
+    initial_value_config["order"] = "10";
+    config.add(initial_value_config, "initial_values", true);
     if (sub_name.empty())
       return config;
     else {
@@ -90,16 +112,17 @@ public:
     }
   } // ... default_config(...)
 
-  Burgers(const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
+  Burgers(const std::shared_ptr< const FluxType > flux = std::make_shared< DefaultFluxType >("u",
+                                                    std::vector< std::string >(dimRange, "1.0/2.0*u[0]*u[0]"),
+                                                    2,
+                                                    DefaultFluxType::static_id(),
+                                                    std::vector< std::vector< std::string > >{{"u[0]", "0", "0"}, {"u[0]", "0", "0"}, {"u[0]", "0", "0"}}),
+          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
           const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]", 10),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const FunctionType > boundary_values = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0))
-    : BaseType(std::make_shared< DefaultFluxType >("u",
-                                                   std::vector< std::string >(dimRange, "1.0/2.0*u[0]*u[0]"),
-                                                   2,
-                                                   DefaultFluxType::static_id(),
-                                                   std::vector< std::vector< std::string > >{{"u[0]", "0", "0"}, {"u[0]", "0", "0"}, {"u[0]", "0", "0"}}),
+          const std::shared_ptr< const BoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >("x", "[0 0 0]", 0))
+    : BaseType(flux,
                source,
                initial_values,
                grid_config,

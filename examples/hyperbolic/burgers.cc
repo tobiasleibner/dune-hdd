@@ -36,6 +36,8 @@
 
 #include <dune/hdd/hyperbolic/problems/burgers.hh>
 #include <dune/hdd/hyperbolic/problems/default.hh>
+#include <dune/hdd/hyperbolic/problems/shallowwater.hh>
+#include <dune/hdd/hyperbolic/problems/transport.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -43,8 +45,8 @@ using namespace Dune::HDD;
 int main()
 {
   try {
-    static const size_t dimDomain = 1;
-    static const size_t dimRange = 2;
+    static const size_t dimDomain = 2;
+    static const size_t dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
 //    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
@@ -53,42 +55,28 @@ int main()
 
     //configure Problem
 //    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::Default< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef typename ProblemType::FunctionType BoundaryValueFunctionType;
-    typedef typename ProblemType::ConfigType ConfigType;
-    ConfigType problem_config = ProblemType::default_config();
-    //set boundary type ("periodic" or "dirichlet")
-    ConfigType boundary_config;
-//    boundary_config["type"] = "dirichlet";
-//    boundary_config["type"] = "periodic";
-    boundary_config["type"] = "absorbing";
-    problem_config.add(boundary_config, "boundary_info", true);
-    //set boundary values (ignored if boundary is periodic)
-    ConfigType boundary_value_config = ProblemType::DefaultFunctionType::default_config();
-    boundary_value_config["type"] = ProblemType::DefaultFunctionType::static_id();
-    boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = "[x[0] x[0] x[0]";
-    boundary_value_config["order"] = "1";
-    problem_config.add(boundary_value_config, "boundary_values", true);
+    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::ShallowWater< EntityType, double, dimDomain, double, dimRange > ProblemType;
 
     //create Problem
     const auto problem_ptr = ProblemType::create();
     const auto& problem = *problem_ptr;
 
     //get grid configuration from problem
-    typedef typename ProblemType::ConfigType ConfigType;
     const auto grid_config = problem.grid_config();
 
     //get analytical flux and initial values
     typedef typename ProblemType::FluxType            AnalyticalFluxType;
     typedef typename ProblemType::SourceType          SourceType;
     typedef typename ProblemType::FunctionType        FunctionType;
+    typedef typename ProblemType::BoundaryValueType   BoundaryValueType;
     typedef typename FunctionType::DomainFieldType    DomainFieldType;
     typedef typename ProblemType::RangeFieldType      RangeFieldType;
-    typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, 1, 1 > IndicatorFunctionType;
+    typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > IndicatorFunctionType;
     typedef typename IndicatorFunctionType::DomainType DomainType;
     const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
+    const std::shared_ptr< const BoundaryValueType > boundary_values = problem.boundary_values();
 //    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create();   // Indicator with value 1 on [0.25,0.75]
 //    std::make_shared< const IndicatorFunctionType > (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
     const std::shared_ptr< const SourceType > source = problem.source();
@@ -105,8 +93,8 @@ int main()
     const GridViewType grid_view = grid->leafGridView();
     const GridViewType& grid_view_ref = grid_view;
     typedef typename Dune::Stuff::Grid::PeriodicGridView< GridViewType >        PeriodicGridViewType;
-//    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
-    typedef Spaces::FV::DefaultProduct< PeriodicGridViewType, RangeFieldType, dimRange >      FVSpaceType;
+    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
+//    typedef Spaces::FV::DefaultProduct< PeriodicGridViewType, RangeFieldType, dimRange > FVSpaceType;
     std::bitset< dimDomain > periodic_directions;
     if (problem.boundary_info()["type"] == "periodic")
       periodic_directions.set();
@@ -125,8 +113,8 @@ int main()
     std::cout << "Projecting initial values..." << std::endl;
     project(*initial_values, u);
 
-    double dt=0.4;
-    const double t_end = 2;
+    double dt = 0.4;
+    const double t_end = 4;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
@@ -136,8 +124,8 @@ int main()
     ConstantFunctionType ratio_dt_dx(dt/dx);
 
     //create operator
-    typedef typename Dune::GDT::Operators::AdvectionLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, FVSpaceType > OperatorType;
-    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, fv_space);
+    typedef typename Dune::GDT::Operators::AdvectionLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType > OperatorType;
+    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space, true);
 
     //create butcher_array
     // forward euler
@@ -157,7 +145,7 @@ int main()
     //search suitable time step length
     std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
     while (!(dtpair.first)) {
-      dtpair = timestepper.find_suitable_dt(dt, 2, 2, 200);
+      dtpair = timestepper.find_suitable_dt(dt, 2, 500, 200);
       dt = dtpair.second;
     }
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
