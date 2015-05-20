@@ -111,7 +111,7 @@ private:
           if (cc == 0)
             str += DSC::toString(0.0002 - get_left_boundary_value(cc)) + "*x[0]+" + DSC::toString(get_left_boundary_value(cc));
           else
-            str += DSC::toString(get_left_boundary_value(cc)) + "*x[0]+" + DSC::toString(get_left_boundary_value(cc));
+            str += DSC::toString(0.0 - get_left_boundary_value(cc)) + "*x[0]+" + DSC::toString(get_left_boundary_value(cc));
       }
       str += "]";
       return str;
