@@ -11,7 +11,7 @@
 #include <string>
 
 #include <dune/stuff/common/string.hh>
-#include <dune/stuff/functions/linear.hh>
+#include <dune/stuff/functions/affine.hh>
 
 #include "default.hh"
 
@@ -32,7 +32,7 @@ public:
   using BaseType::dimDomain;
   using BaseType::dimRange;
   using typename BaseType::FluxSourceEntityType;
-  typedef typename Dune::Stuff::Functions::Linear< FluxSourceEntityType,
+  typedef typename Dune::Stuff::Functions::Affine< FluxSourceEntityType,
                                                                  RangeFieldImp,
                                                                  dimRange,
                                                                  RangeFieldImp,
@@ -171,8 +171,8 @@ public:
     config.add(default_grid_config(), "grid");
     config.add(default_boundary_info_config(), "boundary_info");
     ConfigType flux_config = DefaultFluxType::default_config();
-    flux_config["type"] = FluxType::static_id();
-    flux_config["matrix"] = CreateMatrix< dimRange >::value_str();
+    flux_config["type"] = DefaultFluxType::static_id();
+    flux_config["A"] = CreateMatrix< dimRange >::value_str();
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
