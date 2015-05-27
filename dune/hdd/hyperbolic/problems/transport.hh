@@ -91,9 +91,12 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = DefaultFluxType::static_id();
     flux_config["variable"] = "u";
-    flux_config["expression"] = "[u[0] u[0] u[0]]";
+    flux_config["expression"] = "[u[0] 2*u[0] 3*u[0]; 4*u[0] 5*u[0] 6*u[0]; 7*u[0] 8*u[0] 9*u[0]]";
     flux_config["order"] = "1";
-    flux_config["gradient"] = "[1 0 0; 0 1 0; 0 0 1]";
+    flux_config["gradient"] = "[1 0 0; 4 0 0; 7 0 0]";
+    flux_config["gradient.0"] = "[1 0 0; 4 0 0; 7 0 0]";
+    flux_config["gradient.1"] = "[2 0 0; 5 0 0; 8 0 0]";
+    flux_config["gradient.2"] = "[3 0 0; 6 0 0; 9 0 0]";
     config.add(flux_config, "flux", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();

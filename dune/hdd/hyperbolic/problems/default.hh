@@ -100,7 +100,6 @@ public:
     source_config["num_elements"] = "[1 1 1]";
     source_config["variable"] = "u";
     source_config["values"] = "[0]";
-    source_config["values_are_vectors"] = "false";
     source_config["name"] = static_id();
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();

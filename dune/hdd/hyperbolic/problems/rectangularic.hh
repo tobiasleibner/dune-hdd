@@ -159,8 +159,7 @@ public:
     source_config["upper_right"] = "[7.0]";
     source_config["num_elements"] = "[1]";
     source_config["variable"] = "u";
-    source_config["values"] = CreateSource< dimRange >::value_str();
-    source_config["values_are_vectors"] = "true";
+    source_config["values.0"] = CreateSource< dimRange >::value_str();
     source_config["name"] = static_id();
     config.add(source_config, "source", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
@@ -168,7 +167,7 @@ public:
     initial_value_config["upper_right"] = "[7.0]";
     initial_value_config["num_elements"] = "[7]";
     initial_value_config["values"] = CreateInitialValues< dimRange >::value_str();
-    initial_value_config["values_are_vectors"] = "true";
+    initial_value_config["vector_valued"] = "true";
     config.add(initial_value_config, "initial_values", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();

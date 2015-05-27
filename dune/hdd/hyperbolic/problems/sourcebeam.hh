@@ -64,13 +64,11 @@ private:
   //           = -(1 + l(l+1))u[l]                         if 1.5 < x <= 2
   //           = -5*l(l+1)*u[l]                            else (2 < x <= 3)
   template< size_t N >
-  struct CreateSource {
-    static std::string value_str()
+  struct CreateSourceValues {
+    static void create(ConfigType& source_config)
     {
-      std::string str = "[";
       for (size_t rr = 0; rr < 6; ++rr) {
-        if (rr > 0)
-          str += "; ";
+        std::string str = "[";
         for (size_t cc = 0; cc < N; ++cc) {
           if (cc > 0)
             str += " ";
@@ -87,9 +85,9 @@ private:
             str += "-5*" + DSC::toString(cc*(cc+1)) + "*u[" + DSC::toString(cc) + "]";
           }
         }
+        str += "]";
+        source_config["values." + DSC::toString(rr)] = str;
       }
-      str += "]";
-      return str;
     }
   };
 
@@ -155,8 +153,7 @@ public:
     source_config["upper_right"] = "[1.0]";
     source_config["num_elements"] = "[6]";
     source_config["variable"] = "u";
-    source_config["values"] = CreateSource< dimRange >::value_str();;
-    source_config["values_are_vectors"] = "true";
+    CreateSourceValues< dimRange >::create(source_config);
     source_config["name"] = static_id();
     config.add(source_config, "source", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();

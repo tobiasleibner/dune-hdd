@@ -84,15 +84,14 @@ public:
     flux_config["variable"] = "u";
     flux_config["expression"] = "[u[1] u[1]*u[1]/u[0]+9.81*0.5*u[0]*u[0]]";
     flux_config["order"] = "2";
-    flux_config["gradient"] = "[0 1 0; -1*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0] 0]";
+    flux_config["gradient"] = "[0 1; -1*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0]]";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
     source_config["upper_right"] = "[10.0]";
     source_config["num_elements"] = "[1]";
     source_config["variable"] = "u";
-    source_config["values"] = "[0 0]";
-    source_config["values_are_vectors"] = "true";
+    source_config["values.0"] = "[0 0]";
     source_config["name"] = static_id();
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();

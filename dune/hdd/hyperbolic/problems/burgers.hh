@@ -93,7 +93,10 @@ public:
     flux_config["variable"] = "u";
     flux_config["expression"] = "[1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0] 1.0/2.0*u[0]*u[0]]";
     flux_config["order"] = "2";
-    flux_config["gradient"] = "[u[0] 0 0; u[0] 0 0; u[0] 0 0]";
+    flux_config["gradient"] = "[u[0] 0 0]";
+    flux_config["gradient.0"] = "[u[0] 0 0]";
+    flux_config["gradient.1"] = "[u[0] 0 0]";
+    flux_config["gradient.2"] = "[u[0] 0 0]";
     config.add(flux_config, "flux", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
