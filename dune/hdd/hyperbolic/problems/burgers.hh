@@ -52,7 +52,6 @@ public:
     return BaseType::type() + ".burgers";
   }
 
-protected:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
@@ -88,6 +87,8 @@ public:
   static ConfigType default_config(const std::string sub_name = "")
   {
     ConfigType config = BaseType::default_config();
+    config.add(default_grid_config(), "grid", true);
+    config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = FluxType::static_id();
     flux_config["variable"] = "u";
@@ -101,9 +102,11 @@ public:
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
     initial_value_config["variable"] = "x";
-//    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
-//    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
-    initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
+    if (dimDomain == 1)
+      initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
+    //    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
+    else
+      initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values", true);
     if (sub_name.empty())
@@ -115,16 +118,12 @@ public:
     }
   } // ... default_config(...)
 
-  Burgers(const std::shared_ptr< const FluxType > flux = std::make_shared< DefaultFluxType >("u",
-                                                    std::vector< std::string >(dimRange, "1.0/2.0*u[0]*u[0]"),
-                                                    2,
-                                                    DefaultFluxType::static_id(),
-                                                    std::vector< std::vector< std::string > >{{"u[0]", "0", "0"}, {"u[0]", "0", "0"}, {"u[0]", "0", "0"}}),
-          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]", 10),
+  Burgers(const std::shared_ptr< const FluxType > flux = std::make_shared< DefaultFluxType >(*DefaultFluxType::create(default_config().sub("flux"))),
+          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >(*DefaultSourceType::create(default_config().sub("source"))),
+          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >(*DefaultFunctionType::create(default_config().sub("initial_values"))),
           const ConfigType& grid_config = default_grid_config(),
           const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const BoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >("x", "[0 0 0]", 0))
+          const std::shared_ptr< const BoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >(*DefaultBoundaryValueType::create(default_config().sub("boundary_values"))))
     : BaseType(flux,
                source,
                initial_values,

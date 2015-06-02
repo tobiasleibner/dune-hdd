@@ -121,6 +121,7 @@ public:
   {
     ConfigType config = BaseType::default_config();
     config.add(default_grid_config(), "grid", true);
+    config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
     source_config["upper_right"] = "[7.0]";

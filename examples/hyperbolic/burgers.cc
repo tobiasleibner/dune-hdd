@@ -35,7 +35,6 @@
 #endif
 
 #include <dune/hdd/hyperbolic/problems/burgers.hh>
-#include <dune/hdd/hyperbolic/problems/default.hh>
 #include <dune/hdd/hyperbolic/problems/shallowwater.hh>
 #include <dune/hdd/hyperbolic/problems/transport.hh>
 
@@ -45,7 +44,7 @@ using namespace Dune::HDD;
 int main()
 {
   try {
-    static const size_t dimDomain = 2;
+    static const size_t dimDomain = 1;
     static const size_t dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
@@ -54,8 +53,8 @@ int main()
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
-//    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::ShallowWater< EntityType, double, dimDomain, double, dimRange > ProblemType;
 
     //create Problem
@@ -73,12 +72,12 @@ int main()
     typedef typename FunctionType::DomainFieldType    DomainFieldType;
     typedef typename ProblemType::RangeFieldType      RangeFieldType;
     typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > IndicatorFunctionType;
-    typedef typename IndicatorFunctionType::DomainType DomainType;
-    const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
-    const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
-    const std::shared_ptr< const BoundaryValueType > boundary_values = problem.boundary_values();
+//    typedef typename IndicatorFunctionType::DomainType DomainType;
 //    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create();   // Indicator with value 1 on [0.25,0.75]
 //    std::make_shared< const IndicatorFunctionType > (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
+    const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
+    const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
+    const std::shared_ptr< const BoundaryValueType > boundary_values = problem.boundary_values();
     const std::shared_ptr< const SourceType > source = problem.source();
 
     //create grid
@@ -93,8 +92,8 @@ int main()
     const GridViewType grid_view = grid->leafGridView();
     const GridViewType& grid_view_ref = grid_view;
     typedef typename Dune::Stuff::Grid::PeriodicGridView< GridViewType >        PeriodicGridViewType;
-    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
-//    typedef Spaces::FV::DefaultProduct< PeriodicGridViewType, RangeFieldType, dimRange > FVSpaceType;
+//    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
+    typedef Spaces::FV::DefaultProduct< PeriodicGridViewType, RangeFieldType, dimRange > FVSpaceType;
     std::bitset< dimDomain > periodic_directions;
     if (problem.boundary_info()["type"] == "periodic")
       periodic_directions.set();
@@ -109,23 +108,23 @@ int main()
     typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< RangeFieldType > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
 
-    //visualize initial values
+    //project initial values
     std::cout << "Projecting initial values..." << std::endl;
     project(*initial_values, u);
-
-    double dt = 0.4;
-    const double t_end = 4;
 
     //calculate dx and create lambda = dt/dx for the Lax-Friedrichs flux
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
+
+    double dt = 0.5*dx;
+    const double t_end = 1;
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     ConstantFunctionType ratio_dt_dx(dt/dx);
 
     //create operator
-    typedef typename Dune::GDT::Operators::AdvectionLaxFriedrichs< AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType > OperatorType;
-    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space, true);
+    typedef typename Dune::GDT::Operators::AdvectionGodunov< AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType > OperatorType;
+    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space, false);
 
     //create butcher_array
     // forward euler
@@ -140,7 +139,7 @@ int main()
 
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(lax_friedrichs_operator, u, *source, 0.0, A, b);
+    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(lax_friedrichs_operator, u, *source, A, b);
 
     //search suitable time step length
     std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);

@@ -88,21 +88,25 @@ public:
   static ConfigType default_config(const std::string sub_name = "")
   {
     ConfigType config = BaseType::default_config();
+    config.add(default_grid_config(), "grid", true);
+    config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = DefaultFluxType::static_id();
     flux_config["variable"] = "u";
-    flux_config["expression"] = "[u[0] 2*u[0] 3*u[0]; 4*u[0] 5*u[0] 6*u[0]; 7*u[0] 8*u[0] 9*u[0]]";
+    flux_config["expression"] = "[u[0] u[0] 3*u[0]; 4*u[0] 5*u[0] 6*u[0]; 7*u[0] 8*u[0] 9*u[0]]";
     flux_config["order"] = "1";
     flux_config["gradient"] = "[1 0 0; 4 0 0; 7 0 0]";
     flux_config["gradient.0"] = "[1 0 0; 4 0 0; 7 0 0]";
-    flux_config["gradient.1"] = "[2 0 0; 5 0 0; 8 0 0]";
+    flux_config["gradient.1"] = "[1 0 0; 5 0 0; 8 0 0]";
     flux_config["gradient.2"] = "[3 0 0; 6 0 0; 9 0 0]";
     config.add(flux_config, "flux", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["type"] = DefaultFunctionType::static_id();
     initial_value_config["variable"] = "x";
-    initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
-//    initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
+    if (dimDomain == 1)
+      initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
+    else
+      initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values", true);
     if (sub_name.empty())

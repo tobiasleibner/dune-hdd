@@ -63,14 +63,14 @@ public:
     return BaseType::type() + ".default";
   }
 
-protected:
+private:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0 0.0 0.0]";
     grid_config["upper_right"] = "[1.0 1.0 1.0]";
-    grid_config["num_elements"] = "[60 60 60]";
+    grid_config["num_elements"] = "[512 60 60]";
     return grid_config;
   }
 

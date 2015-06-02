@@ -39,17 +39,17 @@ int main()
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N >= dimRange + 5 to clang for higher dimRange.
-    static const size_t dimRange = 42;
+    static const size_t dimRange = 11;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
-//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
     //create Problem
     const auto problem_ptr = ProblemType::create();
     const auto& problem = *problem_ptr;
@@ -82,7 +82,6 @@ int main()
     typedef Spaces::FV::DefaultProduct< GridViewType, RangeFieldType, dimRange >   FVSpaceType;
     std::cout << "Creating FiniteVolumeSpace..." << std::endl;
     const FVSpaceType fv_space(grid_view);
-
 
     // allocate a discrete function for the concentration
     std::cout << "Allocating discrete functions..." << std::endl;
@@ -121,7 +120,7 @@ int main()
 
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, 0.0, A, b);
+    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, A, b);
 
     //search suitable time step length
     std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
