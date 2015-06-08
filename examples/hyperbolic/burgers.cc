@@ -71,7 +71,7 @@ int main()
     typedef typename ProblemType::BoundaryValueType   BoundaryValueType;
     typedef typename FunctionType::DomainFieldType    DomainFieldType;
     typedef typename ProblemType::RangeFieldType      RangeFieldType;
-    typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > IndicatorFunctionType;
+//    typedef typename Dune::Stuff::Functions::Indicator < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > IndicatorFunctionType;
 //    typedef typename IndicatorFunctionType::DomainType DomainType;
 //    const std::shared_ptr< const FunctionType > initial_values = IndicatorFunctionType::create();   // Indicator with value 1 on [0.25,0.75]
 //    std::make_shared< const IndicatorFunctionType > (std::vector< std::tuple < DomainType, DomainType, RangeFieldType > > (1, std::make_tuple< DomainType, DomainType, RangeFieldType >(DomainType(0.5), DomainType(1), RangeFieldType(1))));
@@ -117,29 +117,29 @@ int main()
     Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
 
-    double dt = 0.5*dx;
+    double dt = dx;
     const double t_end = 1;
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     ConstantFunctionType ratio_dt_dx(dt/dx);
 
     //create operator
-    typedef typename Dune::GDT::Operators::AdvectionGodunov< AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType > OperatorType;
-    OperatorType lax_friedrichs_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space, false);
+    typedef typename Dune::GDT::Operators::AdvectionGodunovWithReconstruction< AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType > OperatorType;
+    OperatorType advection_operator(*analytical_flux, ratio_dt_dx, *boundary_values, fv_space, true);
 
     //create butcher_array
     // forward euler
-    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0]"));
-    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[1]"));
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[1]"));
     // generic second order, x = 1 (see https://en.wikipedia.org/wiki/List_of_Runge%E2%80%93Kutta_methods)
-//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0; 1 0]"));
-//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[0.5 0.5]"));
+    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0; 1 0]"));
+    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[0.5 0.5]"));
     // classic fourth order RK
 //    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0 0 0; 0.5 0 0 0; 0 0.5 0 0; 0 0 1 0]"));
 //    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(lax_friedrichs_operator, u, *source, A, b);
+    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, A, b);
 
     //search suitable time step length
     std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
@@ -148,7 +148,7 @@ int main()
       dt = dtpair.second;
     }
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
-    const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
+    const double saveInterval = 1.0/400.0; //t_end/1000 > dt ? t_end/1000 : dt;
     // now do the time steps
     timestepper.solve(t_end, dt, saveInterval, true);
 
