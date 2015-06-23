@@ -35,9 +35,7 @@ public:
   using BaseType::dimRange;
   using typename BaseType::FluxSourceEntityType;
   using typename BaseType::DefaultFluxType;
-  typedef typename DS::Functions::Checkerboard< EntityImp,
-                                                DomainFieldImp, domainDim,
-                                                RangeFieldImp, rangeDim >  DefaultFunctionType;
+  using typename BaseType::DefaultFunctionType;
   using typename BaseType::DefaultSourceType;
   using typename BaseType::DefaultBoundaryValueType;
 
@@ -59,12 +57,10 @@ public:
 private:
   template< size_t N >
   struct CreateInitialValues {
-    static std::string value_str()
+    static void set(ConfigType& initial_value_cfg)
     {
-      std::string str = "[";
       for (size_t rr = 0; rr < 7; ++rr) {
-        if (rr > 0)
-          str += "; ";
+        std::string str = "[";
         for (size_t cc = 0; cc < N; ++cc) {
           if (cc > 0)
             str += " ";
@@ -77,9 +73,10 @@ private:
             str += "0.0";
           }
         }
+        str += "]";
+        std::string entry = "values." + DSC::toString(rr);
+        initial_value_cfg[entry] = str;
       }
-      str += "]";
-      return str;
     }
   };
 
@@ -167,8 +164,7 @@ public:
     initial_value_config["lower_left"] = "[0.0]";
     initial_value_config["upper_right"] = "[7.0]";
     initial_value_config["num_elements"] = "[7]";
-    initial_value_config["values"] = CreateInitialValues< dimRange >::value_str();
-    initial_value_config["vector_valued"] = "true";
+    CreateInitialValues< dimRange >::set(initial_value_config);
     config.add(initial_value_config, "initial_values", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();

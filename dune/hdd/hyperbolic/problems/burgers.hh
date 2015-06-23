@@ -58,7 +58,7 @@ public:
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0 0.0 0.0]";
     grid_config["upper_right"] = "[1.0 1.0 1.0]";
-    grid_config["num_elements"] = "[60 60 60]";
+    grid_config["num_elements"] = "[8 60 60]";
     return grid_config;
   }
 
@@ -100,13 +100,16 @@ public:
     flux_config["gradient.2"] = "[u[0] 0 0]";
     config.add(flux_config, "flux", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
-    initial_value_config["type"] = DefaultFunctionType::static_id();
+    initial_value_config["lower_left"] = "[0.0 0.0 0.0]";
+    initial_value_config["upper_right"] = "[1.0 1.0 1.0]";
+    initial_value_config["num_elements"] = "[1 1 1]";
     initial_value_config["variable"] = "x";
     if (dimDomain == 1)
-      initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
-    //    initial_value_config["expression"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
+      initial_value_config["values"] = "sin(pi*x[0])";
+    //    initial_value_config["values"] = "sin(pi*(x[0]-4)*(x[0]-10))*exp(-(x[0]-8)^4)";     // waves for 1D, domain [0,16] or the like
     else
-      initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
+      initial_value_config["values.0"] = "1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))"; //bump, only in 2D or higher
+    initial_value_config["name"] = static_id();
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values", true);
     if (sub_name.empty())

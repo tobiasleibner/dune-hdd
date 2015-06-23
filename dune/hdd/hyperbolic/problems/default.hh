@@ -35,8 +35,9 @@ public:
   using BaseType::dimRange;
   typedef typename Dune::Stuff::Functions::Expression
                 < FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, dimRange, dimDomain > DefaultFluxType;
-  typedef typename Dune::Stuff::Functions::Expression
-                < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1 > DefaultFunctionType;
+  typedef typename Dune::Stuff::Functions::ExpressionCheckerboard< EntityImp, DomainFieldImp, dimDomain,
+                                                                     EntityImp, RangeFieldImp, dimDomain,
+                                                                     RangeFieldImp, dimRange, 1 > DefaultFunctionType;
   typedef typename BaseType::BoundaryValueType                                       DefaultBoundaryValueType;
 
   using typename BaseType::FluxType;
@@ -137,18 +138,18 @@ public:
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
-  Default(const std::shared_ptr< const FluxType > flux,
-          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0),
-          const ConfigType& grid_config = default_grid_config(),
-          const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const DefaultBoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >("x", "[0 0 0]", 0))
-    : flux_(flux)
-    , source_(source)
-    , initial_values_(initial_values)
-    , grid_config_(grid_config)
-    , boundary_info_(boundary_info)
-    , boundary_values_(boundary_values)
+  Default(const std::shared_ptr< const FluxType > flux_ptr,
+          const std::shared_ptr< const SourceType > source_ptr = std::make_shared< DefaultSourceType >("u", "[0 0 0]", 0),
+          const std::shared_ptr< const FunctionType > initial_values_ptr = std::make_shared< DefaultFunctionType >("x", "[0 0 0]", 0),
+          const ConfigType& grid_cfg = default_grid_config(),
+          const ConfigType& boundary_info_cfg = default_boundary_info_config(),
+          const std::shared_ptr< const DefaultBoundaryValueType > boundary_vals = std::make_shared< DefaultBoundaryValueType >("x", "[0 0 0]", 0))
+    : flux_(flux_ptr)
+    , source_(source_ptr)
+    , initial_values_(initial_values_ptr)
+    , grid_config_(grid_cfg)
+    , boundary_info_(boundary_info_cfg)
+    , boundary_values_(boundary_vals)
   {}
 
   virtual const std::shared_ptr< const FluxType >& flux() const override

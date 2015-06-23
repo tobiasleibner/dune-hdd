@@ -59,7 +59,7 @@ protected:
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0 0.0 0.0]";
     grid_config["upper_right"] = "[1.0 1.0 1.0]";
-    grid_config["num_elements"] = "[60 60 60]";
+    grid_config["num_elements"] = "[500 60 60]";
     return grid_config;
   }
 
@@ -101,13 +101,19 @@ public:
     flux_config["gradient.2"] = "[3 0 0; 6 0 0; 9 0 0]";
     config.add(flux_config, "flux", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
-    initial_value_config["type"] = DefaultFunctionType::static_id();
+//    initial_value_config["type"] = DefaultFunctionType::static_id();
+//    initial_value_config["variable"] = "x";
+//    if (dimDomain == 1)
+//      initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
+//    else
+//      initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
+//    initial_value_config["order"] = "10";
+    initial_value_config["lower_left"] = "[0.0 0.0 0.0]";
+    initial_value_config["upper_right"] = "[1.0 1.0 1.0]";
+    initial_value_config["num_elements"] = "[5 1 1]";
     initial_value_config["variable"] = "x";
-    if (dimDomain == 1)
-      initial_value_config["expression"] = "[sin(pi*x[0]) sin(pi*x[0]) sin(pi*x[0])]";            // simple sine wave
-    else
-      initial_value_config["expression"] = "[1.0/40.0*exp(1-(2*pi*x[0]-pi)*(2*pi*x[0]-pi)-(2*pi*x[1]-pi)*(2*pi*x[1]-pi))]"; //bump, only in 2D or higher
-    initial_value_config["order"] = "10";
+    initial_value_config["values"] = "[0 sin(pi/2+5*pi*(x[0]-0.3))*exp(-(200*(x[0]-0.3)*(x[0]-0.3))) 0 1.0 0.0]";
+    initial_value_config["name"] = static_id();
     config.add(initial_value_config, "initial_values", true);
     if (sub_name.empty())
       return config;

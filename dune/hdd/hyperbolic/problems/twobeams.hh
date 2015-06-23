@@ -183,10 +183,12 @@ public:
     source_config["name"] = static_id();
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();
-    initial_value_config["type"] = DefaultFunctionType::static_id();
+    initial_value_config["lower_left"] = "[0.0]";
+    initial_value_config["upper_right"] = "[1.0]";
+    initial_value_config["num_elements"] = "[1]";
     initial_value_config["variable"] = "x";
-    initial_value_config["expression"] = CreateInitialValues< dimRange >::value_str();
-    initial_value_config["order"] = "0";
+    initial_value_config["values.0"] = CreateInitialValues< dimRange >::value_str();
+    initial_value_config["name"] = static_id();
     config.add(initial_value_config, "initial_values");
     ConfigType boundary_value_config = BoundaryValueType::default_config();
     boundary_value_config["type"] = BoundaryValueType::static_id();

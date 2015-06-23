@@ -61,7 +61,7 @@ protected:
     ConfigType grid_config;
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0]";
-    grid_config["upper_right"] = "[10]";
+    grid_config["upper_right"] = "[10.0]";
     grid_config["num_elements"] = "[100]";
     return grid_config;
   }
@@ -84,7 +84,7 @@ public:
     flux_config["variable"] = "u";
     flux_config["expression"] = "[u[1] u[1]*u[1]/u[0]+9.81*0.5*u[0]*u[0]]";
     flux_config["order"] = "2";
-    flux_config["gradient"] = "[0 1; -1*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0]]";
+    flux_config["gradient"] = "[0 1; -1.0*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0]]";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
@@ -95,16 +95,18 @@ public:
     source_config["name"] = static_id();
     config.add(source_config, "source");
     ConfigType initial_value_config = DefaultFunctionType::default_config();
-    initial_value_config["type"] = DefaultFunctionType::static_id();
+    initial_value_config["lower_left"] = "[0.0]";
+    initial_value_config["upper_right"] = "[10.0]";
+    initial_value_config["num_elements"] = "[1]";
     initial_value_config["variable"] = "x";
-    initial_value_config["expression"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
+    initial_value_config["values.0"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values");
-    ConfigType boundary_value_config = DefaultFunctionType::default_config();
-    boundary_value_config["type"] = DefaultFunctionType::static_id();
+    ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
+    boundary_value_config["type"] = DefaultBoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";
     boundary_value_config["expression"] = "[0 0 0]";
-    boundary_value_config["order"] = "1";
+    boundary_value_config["order"] = "0";
     config.add(boundary_value_config, "boundary_values");
     if (sub_name.empty())
       return config;

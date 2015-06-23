@@ -41,8 +41,9 @@ public:
   typedef Dune::Stuff::GlobalFunctionValuedFunctionInterface< EntityType, DomainFieldType, dimDomain,
                                                               FluxSourceEntityType, RangeFieldType, dimRange,
                                                               RangeFieldType, dimRange, 1 >             SourceType;
-  typedef Dune::Stuff::LocalizableFunctionInterface
-      < EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange >  FunctionType;
+  typedef Dune::Stuff::GlobalFunctionValuedFunctionInterface< EntityType, DomainFieldType, dimDomain,
+                                                              EntityType, RangeFieldType, dimDomain,
+                                                              RangeFieldType, dimRange, 1 >             FunctionType;
   typedef typename Dune::Stuff::Functions::TimeDependentExpression
                 < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1, double > BoundaryValueType;
   typedef Dune::Stuff::Common::Configuration                                    ConfigType;
