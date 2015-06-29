@@ -41,6 +41,8 @@ public:
   using typename BaseType::FunctionType;
   using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
+  using typename BaseType::MatrixType;
+  using typename BaseType::RangeType;
 
   static std::string static_id()
   {
@@ -51,40 +53,62 @@ public:
   {
     return BaseType::type() + ".twopulses";
   }
-private:
-  template< size_t N >
-  struct CreateSource {
-    static std::string value_str()
-    {
-      std::string str = "[";
-      for (size_t cc = 0; cc < N; ++cc) {
-        if (cc > 0)
-          str += " ";
-        str += "0";
-      }
-      str += "]";
-      return str;
-    }
-  };
-
-  // boundary value has to be [50 50 50 ...]*exp(-(t-1)^2/2) at x = 0 and [50 -50 50 -50 ... ]**exp(-(t-1)^2/2) at x = 7
-  // simulate with function(x) = 100*(x/7-0.5)*((x/7-0.5)/abs(x/7-0.5))^n*(-1)^n*exp(-(t-1)^2/2)
-  template< size_t N >
-  struct CreateBoundaryValues {
-    static std::string value_str()
-    {
-      std::string str = "[";
-      for (size_t cc = 0; cc < N; ++cc) {
-        if (cc > 0)
-          str += " ";
-        str += "100*abs((x[0]/7-0.5))*((x[0]/7-0.5)^" + DSC::toString(cc%2) +")*((-1)^"+ DSC::toString(cc%2) + ")/(abs(x[0]/7-0.5)^" + DSC::toString(cc%2) + ")*exp(-((t-1)^2)/2)";
-      }
-      str += "]";
-      return str;
-    }
-  };
 
 protected:
+  class GetData
+      : BaseType::GetData
+  {
+    typedef typename BaseType::GetData GetDataBaseType;
+  public:
+    using GetDataBaseType::exact_legendre;
+    using GetDataBaseType::basefunctions_values_at_minusone;
+    using GetDataBaseType::basefunctions_values_at_plusone;
+
+    // q - (sigma_a + T/2*S*M^(-1))*u = Q(x)*base_integrated() - (sigma_a(x)*I_{nxn} + T(x)/2*S*M_inverse)*u = q(x) - A(x)*u
+    // here, sigma_a = 0, T = 0 and Q = 0
+    // Thus A(x) = 0 and q(x) = 0
+    static void create_source_values(ConfigType& source_config)
+    {
+      source_config["A.0"] = DSC::toString(MatrixType(0));
+      source_config["b.0"] = DSC::toString(RangeType(0));
+    } // ... create_source_values()
+
+    // boundary value of kinetic equation is 100*delta(v-1)**exp(-(t-1)^2/2) at x = 0 and 100*delta(v+1)*exp(-(t-1)^2/2)
+    // at x = 7, so k-th component of boundary value has to be 50*\phi_k(1)*exp(-(t-1)^2/2) at x = 0 and
+    // 50*\phi_k(-1)*exp(-(t-1)^2/2) at x = 7.
+    // Simulate with function(x) = 50*((\phi_k(-1) - \phi_k(1))*x/7 + \phi_k(1))*exp(-(t-1)^2/2),
+    // For Legendre polynomials, this is [50 50 50 ...]*exp(-(t-1)^2/2) at x = 0 and
+    // [50 -50 50 -50 ... ]*exp(-(t-1)^2/2) at x = 7
+    // simulate with function(x) = 50*((-1)^n - 1)*x/7 + 1)*exp(-(t-1)^2/2)
+    static std::string create_boundary_values()
+    {
+      if (exact_legendre()) {
+        std::string str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            str += " ";
+          str += "50*(" + DSC::toString(((1.0-2.0*(rr%2)) - 1.0)) + "*x[0]/7.0+1)*exp((-(t-1)^2)/2)";
+        }
+        str += "]";
+        return str;
+      } else {
+        std::string str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            str += " ";
+          str += "50*("
+                 + DSC::toString(basefunctions_values_at_minusone()[rr] - basefunctions_values_at_plusone()[rr])
+                 + "*x[0]/7.0+"
+                 + DSC::toString(basefunctions_values_at_plusone()[rr])
+                 + ")*exp((-(t-1)^2)/2)";
+        }
+        str += "]";
+        return str;
+      }
+    } // ... create_boundary_values()
+  }; // class GetData
+
+public:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
@@ -102,7 +126,6 @@ protected:
     return boundary_config;
   }
 
-public:
   static std::unique_ptr< ThisType > create(const ConfigType cfg = default_config(),
                                             const std::string sub_name = static_id())
   {
@@ -117,23 +140,25 @@ public:
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
-  static ConfigType default_config(const std::string sub_name = "")
+  static std::unique_ptr< ThisType > create(const std::string basefunctions_file) {
+    return create(default_config(basefunctions_file), static_id());
+  }
+
+  static ConfigType default_config(const std::string basefunctions_file, const std::string sub_name = "")
   {
-    ConfigType config = BaseType::default_config();
+    ConfigType config = BaseType::default_config(basefunctions_file, sub_name);
     config.add(default_grid_config(), "grid", true);
     config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
     source_config["upper_right"] = "[7.0]";
     source_config["num_elements"] = "[1]";
-    source_config["variable"] = "u";
-    source_config["values.0"] = CreateSource< dimRange >::value_str();
-    source_config["name"] = static_id();
+    GetData::create_source_values(source_config);
     config.add(source_config, "source", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = CreateBoundaryValues< dimRange >::value_str();
+    boundary_value_config["expression"] = GetData::create_boundary_values();
     boundary_value_config["order"] = "10";
     config.add(boundary_value_config, "boundary_values", true);
     if (sub_name.empty())

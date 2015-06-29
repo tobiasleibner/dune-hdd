@@ -50,6 +50,7 @@ public:
   using typename BaseType::FunctionType;
   using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
+  using typename BaseType::RangeType;
 
   static std::string static_id()
   {
@@ -60,63 +61,87 @@ public:
   {
     return BaseType::type() + ".onebeam";
   }
-private:
-  // precalculated boundary values, for n > 30, the boundary value is less than 1e-28 and thus set to 0;
-  static const std::vector< RangeFieldImp > left_boundary_values_;
-
-  static RangeFieldImp get_left_boundary_value(const size_t n) {
-    if (n <= 30) {
-      return left_boundary_values_[n];
-    } else {
-      return 0.0;
-    }
-  }
-
-  // sigma_a = 10 if 0.4 <= x <= 0.7, 0 else
-  // T = Q = 0
-  // l-th component of Source is -(sigma_a + T/2*l(l+1))*u[l] + \int_{-1}^1 Q*P_l d\mu), so here
-  // Source[l] = -10*u[l]       if 0.4 <= x <= 0.7
-  //           = 0              else
-  template< size_t N >
-  struct CreateSourceValues {
-    static void create(ConfigType& source_config)
-    {
-      for (size_t rr = 0; rr < 10; ++rr) {
-        std::string str = "[";
-        for (size_t cc = 0; cc < N; ++cc) {
-          if (cc > 0)
-            str += " ";
-          if (rr >= 4 && rr <= 7)      // 0.4 <= x <= 0.7
-            str += "-10.0*u[" + DSC::toString(cc) + "]";
-          else
-            str += "0.0";
-        }
-        str += "]";
-        source_config["values." + DSC::toString(rr)] = str;
-      }
-    }
-  };
-
-  // boundary value has to be (l-th component) int_{-1}^1 3*exp(3*m + 3)/(exp(6) - 1) * P_l(m) dm at x = 0 and [0.0002 0 0 ... ] at x = 1
-  template< size_t N >
-  struct CreateBoundaryValues {
-    static std::string value_str()
-    {
-      std::string str = "[";
-      for (size_t cc = 0; cc < N; ++cc) {
-          if (cc > 0)
-            str += " ";
-          if (cc == 0)
-            str += DSC::toString(0.0002 - get_left_boundary_value(cc)) + "*x[0]+" + DSC::toString(get_left_boundary_value(cc));
-          else
-            str += DSC::toString(0.0 - get_left_boundary_value(cc)) + "*x[0]+" + DSC::toString(get_left_boundary_value(cc));
-      }
-      str += "]";
-      return str;
-    }
-  };
 
 protected:
+  class GetData
+      : BaseType::GetData
+  {
+    typedef typename BaseType::GetData GetDataBaseType;
+  public:
+    using GetDataBaseType::exact_legendre;
+    using GetDataBaseType::base_integrated;
+    using GetDataBaseType::onebeam_left_boundary_values;
+
+    // q - (sigma_a + T/2*S*M^(-1))*u = Q(x)*base_integrated() - (sigma_a(x)*I_{nxn} + T(x)/2*S*M_inverse)*u = q(x) - A(x)*u
+    // here, sigma_a = 10 if 0.4 <= x <= 0.7, 0 else
+    // T = Q = 0
+    static void create_source_values(ConfigType& source_config)
+    {
+      for (size_t ii = 0; ii < 10; ++ii) {
+        std::string A_str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            A_str += "; ";
+          for (size_t cc = 0; cc < dimRange; ++cc) {
+            if (cc > 0)
+              A_str += " ";
+            if (rr == cc && ii >= 4 && ii <= 6)
+              A_str += "-10";
+            else
+              A_str += "0";
+          }
+        }
+        A_str += "]";
+        source_config["A." + DSC::toString(ii)] = A_str;
+        source_config["b." + DSC::toString(ii)] = DSC::toString(RangeType(0));
+      }
+    } // ... create_source_values()
+
+    // boundary value of kinetic equation is 3*exp(3*v + 3)/(exp(6) - 1) at x = 0 and 10^(-4) at x = 1,
+    // so k-th component of boundary value has to be (3*exp(3*v + 3)/(exp(6) - 1), \phi_k(v))_v at x = 0 and
+    // 10^(-4)*base_integrated_k at x = 1.
+    // simulate with linear interpolating function
+    static std::string create_boundary_values()
+    {
+      if (exact_legendre()) {
+        std::string str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            str += " ";
+          if (rr == 0)
+            str += DSC::toString(0.0002 - get_left_boundary_value(rr)) + "*x[0]+" + DSC::toString(get_left_boundary_value(rr));
+          else
+            str += DSC::toString(0.0 - get_left_boundary_value(rr)) + "*x[0]+" + DSC::toString(get_left_boundary_value(rr));
+        }
+        str += "]";
+        return str;
+      } else {
+        std::string str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            str += " ";
+          str += DSC::toString(0.0001*base_integrated()[rr] - onebeam_left_boundary_values()[rr]) + "*x[0]+" + DSC::toString(onebeam_left_boundary_values()[rr]);
+        }
+        str += "]";
+        return str;
+      }
+    } // ... create_boundary_values()
+
+  private:
+    // precalculated boundary values if the legendre polynomials are used. For n > 30, the boundary value is less than
+    // 1e-28 and thus set to 0
+    static const std::vector< RangeFieldImp > left_boundary_values_;
+
+    static RangeFieldImp get_left_boundary_value(const size_t n) {
+      if (n <= 30) {
+        return left_boundary_values_[n];
+      } else {
+        return 0.0;
+      }
+    }
+  }; // class GetData
+
+public:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
@@ -134,7 +159,6 @@ protected:
     return boundary_config;
   }
 
-public:
   static std::unique_ptr< ThisType > create(const ConfigType cfg = default_config(),
                                             const std::string sub_name = static_id())
   {
@@ -149,9 +173,13 @@ public:
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
-  static ConfigType default_config(const std::string sub_name = "")
+  static std::unique_ptr< ThisType > create(const std::string basefunctions_file) {
+    return create(default_config(basefunctions_file), static_id());
+  }
+
+  static ConfigType default_config(const std::string basefunctions_file = "", const std::string sub_name = "")
   {
-    ConfigType config = BaseType::default_config();
+    ConfigType config = BaseType::default_config(basefunctions_file, sub_name);
     config.add(default_grid_config(), "grid", true);
     config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType source_config = DefaultSourceType::default_config();
@@ -159,13 +187,13 @@ public:
     source_config["upper_right"] = "[1.0]";
     source_config["num_elements"] = "[10]";
     source_config["variable"] = "u";
-    CreateSourceValues< dimRange >::create(source_config);
+    GetData::create_source_values(source_config);
     source_config["name"] = static_id();
     config.add(source_config, "source", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = CreateBoundaryValues< dimRange >::value_str();
+    boundary_value_config["expression"] = GetData::create_boundary_values();
     boundary_value_config["order"] = "10";
     config.add(boundary_value_config, "boundary_values", true);
     if (sub_name.empty())
@@ -194,7 +222,7 @@ public:
 
 template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
 const std::vector< RangeFieldImp >
-OneBeam< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::left_boundary_values_ = {1.0,
+OneBeam< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::left_boundary_values_ = {1.0,
                                                                                                   6.71636489980355855245e-01,
                                                                                                   3.28363510019644144755e-01,
                                                                                                   1.24363973280948905686e-01,

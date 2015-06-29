@@ -51,9 +51,6 @@ public:
                                                                    FluxSourceEntityType, RangeFieldImp, dimRange,
                                                                    RangeFieldImp, dimRange, 1 >    DefaultSourceType;
 
-  typedef typename DefaultFunctionType::DomainType    DomainType;
-  typedef typename DefaultFunctionType::RangeType     RangeType;
-
   static std::string static_id()
   {
     return BaseType::static_id() + ".default";

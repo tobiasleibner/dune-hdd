@@ -44,6 +44,8 @@ public:
   using typename BaseType::FunctionType;
   using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
+  using typename BaseType::RangeType;
+  using typename BaseType::MatrixType;
 
   static std::string static_id()
   {
@@ -54,67 +56,124 @@ public:
   {
     return BaseType::type() + ".rectangularic";
   }
-private:
-  template< size_t N >
-  struct CreateInitialValues {
-    static void set(ConfigType& initial_value_cfg)
-    {
-      for (size_t rr = 0; rr < 7; ++rr) {
-        std::string str = "[";
-        for (size_t cc = 0; cc < N; ++cc) {
-          if (cc > 0)
-            str += " ";
-          if (cc == 0) {
-            if (rr == 3)
-              str += "20";
-            else
-              str += "0.0002";
-          } else {
-            str += "0.0";
-          }
-        }
-        str += "]";
-        std::string entry = "values." + DSC::toString(rr);
-        initial_value_cfg[entry] = str;
-      }
-    }
-  };
-
-  template< size_t N >
-  struct CreateSource {
-    static std::string value_str()
-    {
-      std::string str = "[";
-      for (size_t cc = 0; cc < N; ++cc) {
-        if (cc > 0)
-          str += " ";
-        str += "-0.005*u[" + DSC::toString(cc) + "]*" + DSC::toString(cc*(cc+1));
-      }
-      str += "]";
-      return str;
-    }
-  };
-
-  // boundary value has to be [2*10^(-4) 0 0 0 0 0 ... ] on both sides
-  template< size_t N >
-  struct CreateBoundaryValues {
-    static std::string value_str()
-    {
-    std::string str = "[";
-    for (size_t cc = 0; cc < N; ++cc) {
-      if (cc > 0)
-        str += " ";
-      if (cc == 0)
-        str += "0.0002";
-      else
-        str += "0";
-    }
-    str += "]";
-    return str;
-  }
-  };
 
 protected:
+  class GetData
+      : BaseType::GetData
+  {
+    typedef typename BaseType::GetData GetDataBaseType;
+  public:
+    using GetDataBaseType::exact_legendre;
+    using GetDataBaseType::S;
+    using GetDataBaseType::M_inverse;
+    using GetDataBaseType::base_integrated;
+
+    // initial value of kinetic equation is 10 if 3 <= x <= 4 and 10^(-4) else, thus initial value of the
+    // k-th component of the moment vector is 10*base_integrated_k or 10^(-4)*base_integrated_k.
+    // For Legendre polynomials, this is 20 or 0.0002 if k == 0 and 0 else
+    static void create_initial_values(ConfigType& initial_value_cfg)
+    {
+      if (exact_legendre()) {
+        for (size_t ii = 0; ii < 7; ++ii) {
+          std::string str = "[";
+          for (size_t rr = 0; rr < dimRange; ++rr) {
+            if (rr > 0)
+              str += " ";
+            if (rr == 0) {
+              if (ii == 3)
+                str += "20";
+              else
+                str += "0.0002";
+            } else {
+              str += "0.0";
+            }
+          }
+          str += "]";
+          std::string entry = "values." + DSC::toString(ii);
+          initial_value_cfg[entry] = str;
+        }
+      } else {
+        for (size_t ii = 0; ii < 7; ++ii) {
+          std::string str = "[";
+          for (size_t rr = 0; rr < dimRange; ++rr) {
+            if (rr > 0)
+              str += " ";
+            if (ii == 3)
+              str += DSC::toString(10*base_integrated()[rr]);
+            else
+              str += DSC::toString(0.0001*base_integrated()[rr]);
+          }
+          str += "]";
+          std::string entry = "values." + DSC::toString(ii);
+          initial_value_cfg[entry] = str;
+        }
+      }
+    } // ... create_initial_values()
+
+    // q - (sigma_a + T/2*S*M^(-1))*u = Q(x)*base_integrated() - (sigma_a(x)*I_{nxn} + T(x)/2*S*M_inverse)*u = q(x) - A(x)*u
+    // here, sigma_a = 0, T = 10^(-2) and Q = 0
+    // Thus A(x) = 0.005*S*M_inverse and q(x) = 0
+    // For Legendre Polynomials, this gives A[rr][rr] = 0.005*rr*(rr+1), A[rr][cc] = 0 if rr != cc;
+    static void create_source_values(ConfigType& source_config)
+    {
+      if (exact_legendre()) {
+        std::string A_str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            A_str += "; ";
+          for (size_t cc = 0; cc < dimRange; ++cc) {
+            if (cc > 0)
+              A_str += " ";
+            if (cc == rr)
+              A_str += DSC::toString(-0.005*cc*(cc+1));
+            else
+              A_str += "0";
+          }
+        }
+        A_str += "]";
+        source_config["A.0"] = A_str;
+        source_config["b.0"] = DSC::toString(RangeType(0));
+      } else {
+        MatrixType S_M_inverse(S());
+        S_M_inverse.rightmultiply(M_inverse());
+        S_M_inverse *= -0.005;
+        source_config["A.0"] = DSC::toString(S_M_inverse);
+        source_config["b.0"] = DSC::toString(RangeType(0));
+      }
+    } // ... create_source_values()
+
+    // boundary value of kinetic equation is 10^(-4) at x = 0 and x = 7,
+    // so k-th component of boundary value has to be 10^(-4)*base_integrated_k at x = 0 and x = 7.
+    // For Legendre polynomials, this is [0.0002 0 0 ... ] at both sides
+    // simulate with constant interpolating function
+    static std::string create_boundary_values()
+    {
+      if (exact_legendre()) {
+        std::string str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            str += " ";
+          if (rr == 0)
+            str += "0.0002";
+          else
+            str += "0";
+        }
+        str += "]";
+        return str;
+      } else {;
+        std::string str = "[";
+        for (size_t rr = 0; rr < dimRange; ++rr) {
+          if (rr > 0)
+            str += " ";
+          str += DSC::toString(0.0001*base_integrated()[rr]);
+        }
+        str += "]";
+        return str;
+      }
+    } // ... create_boundary_values()
+  }; // class GetData
+
+public:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
@@ -132,7 +191,6 @@ protected:
     return boundary_config;
   }
 
-public:
   static std::unique_ptr< ThisType > create(const ConfigType cfg = default_config(),
                                             const std::string sub_name = static_id())
   {
@@ -147,29 +205,32 @@ public:
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
-  static ConfigType default_config(const std::string sub_name = "")
+  static std::unique_ptr< ThisType > create(const std::string basefunctions_file) {
+    return create(default_config(basefunctions_file), static_id());
+  } // ... create(...)
+
+  static ConfigType default_config(const std::string basefunctions_file = "", const std::string sub_name = "")
   {
-    ConfigType config = BaseType::default_config();
+    ConfigType config = BaseType::default_config(basefunctions_file, sub_name);
     config.add(default_grid_config(), "grid", true);
     config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
     source_config["upper_right"] = "[7.0]";
     source_config["num_elements"] = "[1]";
-    source_config["variable"] = "u";
-    source_config["values.0"] = CreateSource< dimRange >::value_str();
+    GetData::create_source_values(source_config);
     source_config["name"] = static_id();
     config.add(source_config, "source", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
     initial_value_config["lower_left"] = "[0.0]";
     initial_value_config["upper_right"] = "[7.0]";
     initial_value_config["num_elements"] = "[7]";
-    CreateInitialValues< dimRange >::set(initial_value_config);
+    GetData::create_initial_values(initial_value_config);
     config.add(initial_value_config, "initial_values", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = CreateBoundaryValues< dimRange >::value_str();
+    boundary_value_config["expression"] = GetData::create_boundary_values();
     boundary_value_config["order"] = "10";
     config.add(boundary_value_config, "boundary_values", true);
     if (sub_name.empty())

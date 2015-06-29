@@ -44,6 +44,7 @@ public:
   using typename BaseType::FunctionType;
   using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
+  using typename BaseType::MatrixType;
 
   static std::string static_id()
   {
@@ -54,64 +55,148 @@ public:
   {
     return BaseType::type() + ".sourcebeam";
   }
-private:
-  // sigma_a = 1 if x <= 2, 0 else
-  // T = 0 if x <= 1, 2 if 1 < x <= 2, 10 else
-  // Q = 1 if 1 <= x <= 1.5, 0 else
-  // l-th component of Source is -(sigma_a + T/2*l(l+1))*u[l] + \int_{-1}^1 Q*P_l d\mu), so here
-  // Source[l] = -u[l]                                     if x <= 1
-  //           = -(1 + l(l+1))u[l] + 2*delta(l)            if 1 < x <= 1.5
-  //           = -(1 + l(l+1))u[l]                         if 1.5 < x <= 2
-  //           = -5*l(l+1)*u[l]                            else (2 < x <= 3)
-  template< size_t N >
-  struct CreateSourceValues {
-    static void create(ConfigType& source_config)
-    {
-      for (size_t rr = 0; rr < 6; ++rr) {
-        std::string str = "[";
-        for (size_t cc = 0; cc < N; ++cc) {
-          if (cc > 0)
-            str += " ";
-          if (rr == 0 || rr == 1) {                     // x <= 1
-            str += "-u[" + DSC::toString(cc) + "]";
-          } else if (rr == 2) {                         // 1 <= x <= 1.5
-            if (cc == 0)
-              str += "-(1+" + DSC::toString(cc*(cc+1)) + ")*u[" + DSC::toString(cc) + "]+2";
-            else
-              str += "-(1+" + DSC::toString(cc*(cc+1)) + ")*u[" + DSC::toString(cc) + "]";
-          } else if (rr == 3) {                         // 1.5 <= x <= 2
-            str += "-(1+" + DSC::toString(cc*(cc+1)) + ")*u[" + DSC::toString(cc) + "]";
-          } else {                                      // 2 <= x <= 3
-            str += "-5*" + DSC::toString(cc*(cc+1)) + "*u[" + DSC::toString(cc) + "]";
-          }
-        }
-        str += "]";
-        source_config["values." + DSC::toString(rr)] = str;
-      }
-    }
-  };
-
-  // boundary value has to be [0.5 0.5 0.5 ...] at x = 0 and [0.0002 0 0 ... ] at x = 3
-  // simulate with function(x) = 0.5 - (0.5-0.0002)*x/3 for first component and 0.5 - 0.5*x/3 for other components
-  template< size_t N >
-  struct CreateBoundaryValues {
-    static std::string value_str()
-    {
-      std::string str = "[";
-      for (size_t cc = 0; cc < N; ++cc) {
-        if (cc > 0)
-          str += " ";
-        if (cc == 0)
-         str += "0.5-0.4998*x[0]/3.0";
-        else
-          str += "0.5-0.5*x[0]/3.0";
-      }
-      str += "]";
-      return str;
-    }
-  };
 
 protected:
+  class GetData
+      : BaseType::GetData
+  {
+    typedef typename BaseType::GetData GetDataBaseType;
+  public:
+    using GetDataBaseType::exact_legendre;
+    using GetDataBaseType::S;
+    using GetDataBaseType::M_inverse;
+    using GetDataBaseType::base_integrated;
+    using GetDataBaseType::basefunctions_values_at_plusone;
+
+    // q - (sigma_a + T/2*S*M^(-1))*u = Q(x)*base_integrated() - (sigma_a(x)*I_{nxn} + T(x)/2*S*M_inverse)*u = q(x) - A(x)*u
+    // sigma_a = 1 if x <= 2, 0 else
+    // T = 0 if x <= 1, 2 if 1 < x <= 2, 10 else
+    // Q = 1 if 1 <= x <= 1.5, 0 else
+    // Thus A(x) = I_{nxn}                                   if x <= 1
+    //           = I_[nxn} + S*M_inverse                     if 1 < x <= 2
+    //           = 5*S*M_inverse                             else (2 < x <= 3)
+    // and  q(x) = base_integrated                           if 1 < x <= 1.5
+    //           = 0                                         else
+    // For Legendre Polynomials, l-th component of Source is -(sigma_a + T/2*l(l+1))*u[l] + \int_{-1}^1 Q*P_l d\mu), so here
+    // Source[l] = -u[l]                                     if x <= 1
+    //           = -(1 + l(l+1))u[l] + 2*delta(l)            if 1 < x <= 1.5
+    //           = -(1 + l(l+1))u[l]                         if 1.5 < x <= 2
+    //           = -5*l(l+1)*u[l]                            else (2 < x <= 3)
+    static void create_source_values(ConfigType& source_config)
+    {
+      if (exact_legendre()) {
+        for (size_t ii = 0; ii < 6; ++ii) {
+          std::string A_str = "[";
+          std::string q_str = "[";
+          for (size_t rr = 0; rr < dimRange; ++rr) {
+            if (rr > 0) {
+              A_str += "; ";
+              q_str += " ";
+            }
+            if (ii == 2 && rr == 0)     // 1 < x <= 1.5
+              q_str += "2";
+            else
+              q_str += "0";
+            for (size_t cc = 0; cc < dimRange; ++cc) {
+              if (cc > 0)
+                A_str += " ";
+              if (ii == 0 || ii == 1) {                                // x <= 1
+                if (cc == rr)
+                  A_str += "-1";
+                else
+                  A_str += "0";
+              } else if (ii == 2 || ii == 3) {                         // 1 <= x <= 2
+                if (cc == rr)
+                  A_str += DSC::toString(-1.0 - cc*(cc+1));
+                else
+                  A_str += "0";
+              } else {                                                  // 2 <= x <= 3
+                if (cc == rr)
+                  A_str += DSC::toString(-5.0*cc*(cc+1));
+                else
+                  A_str += "0";
+              }
+            }
+          }
+          A_str += "]";
+          q_str += "]";
+          source_config["A." + DSC::toString(ii)] = A_str;
+          source_config["b." + DSC::toString(ii)] = q_str;
+        }
+      } else {
+        MatrixType S_M_inverse(S());
+        S_M_inverse.rightmultiply(M_inverse());
+        for (size_t ii = 0; ii < 6; ++ii) {
+          std::string A_str = "[";
+          std::string q_str = "[";
+          if (ii == 2)                                           // 1 <= x <= 1.5
+            q_str = DSC::toString(base_integrated());
+          for (size_t rr = 0; rr < dimRange; ++rr) {
+            if (rr > 0) {
+              A_str += "; ";
+              q_str += " ";
+            }
+            if (ii != 2)
+              q_str += "0";
+            for (size_t cc = 0; cc < dimRange; ++cc) {
+              if (cc > 0)
+                A_str += " ";
+              if (ii == 0 || ii == 1) {                                // x <= 1
+                if (cc == rr)
+                  A_str += "-1";
+                else
+                  A_str += "0";
+              } else if (ii == 2 || ii == 3) {                         // 1 <= x <= 2
+                if (cc == rr)
+                  A_str += DSC::toString(-1.0 - S_M_inverse[rr][cc]);
+                else
+                  A_str += DSC::toString(-S_M_inverse[rr][cc]);
+              } else {                                                  // 2 <= x <= 3
+                A_str += DSC::toString(-5.0*S_M_inverse[rr][cc]);
+              }
+            }
+          }
+          A_str += "]";
+          q_str += "]";
+          source_config["A." + DSC::toString(ii)] = A_str;
+          source_config["b." + DSC::toString(ii)] = q_str;
+        }
+      }
+    } // ... create_source_values()
+
+    // boundary value of kinetic equation is delta(v-1) at x = 0 and 10^(-4) at x = 3,
+    // so k-th component of boundary value has to be \phi_k(1) at x = 0 and 10^(-4)*base_integrated_k at x = 3
+    // for Legendre polynomials, this is [0.5 0.5 0.5 ...] at x = 0 and [0.0002 0 0 ... ] at x = 3
+    // simulate with linear interpolating function
+    static std::string create_boundary_values()
+    {
+      if (exact_legendre()) {
+        std::string str = "[";
+        for (size_t cc = 0; cc < dimRange; ++cc) {
+          if (cc > 0)
+            str += " ";
+          if (cc == 0)
+            str += "0.5-0.4998*x[0]/3.0";
+          else
+            str += "0.5-0.5*x[0]/3.0";
+        }
+        str += "]";
+        return str;
+      } else {
+        const auto& basefunctions_right = basefunctions_values_at_plusone();
+        std::string str = "[";
+        for (size_t cc = 0; cc < dimRange; ++cc) {
+          if (cc > 0)
+            str += " ";
+          str += DSC::toString(basefunctions_right[cc]) + "+" + DSC::toString(0.0001*(base_integrated()[cc]) - basefunctions_right[cc]) + "*x[0]/3.0";
+        }
+        str += "]";
+        return str;
+      }
+    } // ... create_boundary_values()
+  }; // class GetData
+
+public:
   static ConfigType default_grid_config()
   {
     ConfigType grid_config;
@@ -129,7 +214,6 @@ protected:
     return boundary_config;
   }
 
-public:
   static std::unique_ptr< ThisType > create(const ConfigType cfg = default_config(),
                                             const std::string sub_name = static_id())
   {
@@ -144,23 +228,26 @@ public:
                                                   grid_config, boundary_info, boundary_values);
   } // ... create(...)
 
-  static ConfigType default_config(const std::string sub_name = "")
+  static std::unique_ptr< ThisType > create(const std::string basefunctions_file) {
+    return create(default_config(basefunctions_file), static_id());
+  } // ... create(...)
+
+  static ConfigType default_config(const std::string basefunctions_file = "", const std::string sub_name = "")
   {
-    ConfigType config = BaseType::default_config();
+    ConfigType config = BaseType::default_config(basefunctions_file, sub_name);
     config.add(default_grid_config(), "grid", true);
     config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
     source_config["upper_right"] = "[1.0]";
     source_config["num_elements"] = "[6]";
-    source_config["variable"] = "u";
-    CreateSourceValues< dimRange >::create(source_config);
+    GetData::create_source_values(source_config);
     source_config["name"] = static_id();
     config.add(source_config, "source", true);
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();
     boundary_value_config["type"] = DefaultBoundaryValueType::static_id();
     boundary_value_config["variable"] = "x";
-    boundary_value_config["expression"] = CreateBoundaryValues< dimRange >::value_str();
+    boundary_value_config["expression"] = GetData::create_boundary_values();
     boundary_value_config["order"] = "10";
     config.add(boundary_value_config, "boundary_values", true);
     if (sub_name.empty())

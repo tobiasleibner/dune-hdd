@@ -58,7 +58,7 @@ public:
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0 0.0 0.0]";
     grid_config["upper_right"] = "[1.0 1.0 1.0]";
-    grid_config["num_elements"] = "[8 60 60]";
+    grid_config["num_elements"] = "[500 60 60]";
     return grid_config;
   }
 
