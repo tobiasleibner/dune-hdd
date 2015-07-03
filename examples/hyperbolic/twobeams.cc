@@ -11,11 +11,13 @@
 #include <memory>
 #include <iostream>
 #include <fstream>
+#include <chrono>
 
 #include <dune/common/parallel/mpihelper.hh>
 #include <dune/common/fvector.hh>
 
 #include <dune/stuff/common/string.hh>
+#include <dune/stuff/common/profiler.hh>
 #include <dune/stuff/grid/provider/cube.hh>
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/la/container/common.hh>
@@ -38,9 +40,15 @@
 using namespace Dune::GDT;
 using namespace Dune::HDD;
 
-int main()
+int main(int argc, char* argv[])
 {
+  typedef Dune::MPIHelper MPIHelper;
+  MPIHelper::instance(argc, argv);
+//  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
   try {
+    // setup Profiler to get timings
+    DSC::Profiler& profiler_ref = DSC::profiler();
+    profiler_ref.startTiming("Solving");
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
@@ -50,11 +58,11 @@ int main()
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
-//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
     //create Problem
     const auto problem_ptr = ProblemType::create(/*"legendre_pol.csv"*/);
     const auto& problem = *problem_ptr;
@@ -69,7 +77,7 @@ int main()
     typedef typename ProblemType::BoundaryValueType     BoundaryValueType;
     typedef typename FunctionType::DomainFieldType      DomainFieldType;
     typedef typename ProblemType::RangeFieldType        RangeFieldType;
-    std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
+    const std::shared_ptr< const AnalyticalFluxType > analytical_flux = problem.flux();
     const std::shared_ptr< const FunctionType > initial_values = problem.initial_values();
     const std::shared_ptr< const BoundaryValueType > boundary_values = problem.boundary_values();
     const std::shared_ptr< const SourceType > source = problem.source();
@@ -84,7 +92,7 @@ int main()
     std::cout << "Creating GridView..." << std::endl;
     typedef typename GridType::LeafGridView                                        GridViewType;
     const GridViewType grid_view = grid->leafGridView();
-    typedef Spaces::FV::DefaultProduct< GridViewType, RangeFieldType, dimRange >   FVSpaceType;
+    typedef Spaces::FV::DefaultProduct< GridViewType, RangeFieldType, dimRange, 1 >   FVSpaceType;
     std::cout << "Creating FiniteVolumeSpace..." << std::endl;
     const FVSpaceType fv_space(grid_view);
 
@@ -102,7 +110,7 @@ int main()
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    double dt = 0.4; //dx/4.0;
+    double dt = 0.0005; //dx/4.0;
     const double t_end = 2;
     //create operator
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
@@ -121,14 +129,14 @@ int main()
 //    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 
     //search suitable time step length
-    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
-    while (!(dtpair.first)) {
-      ConstantFunctionType dx_function(dx);
-      OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
-      Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
-      dtpair = timestepper.find_suitable_dt(dt, 2, 500, 1000);
-      dt = dtpair.second;
-    }
+//    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
+//    while (!(dtpair.first)) {
+//      ConstantFunctionType dx_function(dx);
+//      OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
+//      Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
+//      dtpair = timestepper.find_suitable_dt(dt, 2, 500, 1000);
+//      dt = dtpair.second;
+//    }
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
     //create timestepper
@@ -138,9 +146,17 @@ int main()
     Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
 
     const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
-    // now do the time steps
-    timestepper.solve(t_end, dt, saveInterval, true, true, true);
 
+    // now do the time steps
+    timestepper.solve(t_end, dt, saveInterval);
+    profiler_ref.stopTiming("Solving");
+    std::cout << "Solving done, took " << profiler_ref.getTiming("Solving", false)/1000.0 << " seconds (walltime "
+                 << profiler_ref.getTiming("Solving", true)/1000.0 << " seconds)" << std::endl;
+
+    // visualize solution
+    timestepper.visualize_solution();
+    // write solution to *.csv file
+    std::cout << "Writing solution to .csv file...";
     remove((problem.static_id() + "_P" + DSC::toString(dimRange - 1) + "CGLegendre.csv").c_str());
     std::ofstream output_file(problem.static_id() + "_P" + DSC::toString(dimRange - 1) + "CGLegendre.csv");
     const auto solution = timestepper.solution();
@@ -161,9 +177,8 @@ int main()
       output_file << std::endl;
     }
     output_file.close();
+    std::cout << " done" << std::endl;
 
-
-    std::cout << "Finished!!\n";
 
     return 0;
   } catch (Dune::Exception& e) {
