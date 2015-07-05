@@ -18,11 +18,16 @@ TARGET_LINK_LIBRARIES(example_hyperbolic_burgers
 TARGET_LINK_LIBRARIES(example_hyperbolic_twobeams
                       ${COMMON_LIBS} ${Boost_FILESYSTEM_LIBRARY})
 
-add_dune_alugrid_flags(example_hyperbolic_burgers)
-add_dune_alugrid_flags(example_hyperbolic_twobeams)
-
-add_dune_superlu_flags(example_hyperbolic_burgers)
-add_dune_superlu_flags(example_hyperbolic_twobeams)
-
-add_dune_tbb_flags(example_hyperbolic_burgers)
-add_dune_tbb_flags(example_hyperbolic_twobeams)
+foreach(target
+example_hyperbolic_burgers
+example_hyperbolic_twobeams
+        )
+  add_dune_parmetis_flags(${target})
+  add_dune_superlu_flags(${target})
+  add_dune_umfpack_flags(${target})
+  add_dune_tbb_flags(${target})
+  add_dune_alugrid_flags(${target})
+  add_dune_mpi_flags(${target})
+  target_link_libraries(${target} parmetis )
+  add_dune_alugrid_flags(${target})
+endforeach(_target)
