@@ -48,11 +48,13 @@ int main(int argc, char* argv[])
   try {
     // setup Profiler to get timings
     DSC::Profiler& profiler_ref = DSC::profiler();
+    DS::threadManager().set_max_threads(8);
+    DSC_CONFIG.set("threading.partition_factor", 1, true);
     profiler_ref.startTiming("Solving");
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
-    static const size_t dimRange = 16;
+    static const size_t dimRange = 50;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
@@ -110,12 +112,13 @@ int main(int argc, char* argv[])
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    double dt = 0.0005; //dx/4.0;
-    const double t_end = 2;
+    double dt = 0.00005; //dx/4.0;
+    const double t_end = 0.1;
     //create operator
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     typedef typename Dune::GDT::Operators::AdvectionGodunov
             < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
+    typedef typename Dune::GDT::Operators::AdvectionSource< SourceType, FVSpaceType > SourceOperatorType;
 
     //create butcher_array
     // forward euler
@@ -143,7 +146,8 @@ int main(int argc, char* argv[])
     std::cout << "Creating TimeStepper..." << std::endl;
     ConstantFunctionType dx_function(dx);
     OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
-    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
+    SourceOperatorType source_operator(*source, fv_space);
+    Dune::GDT::TimeStepper::RungeKutta< OperatorType, SourceOperatorType, FVFunctionType, double > timestepper(advection_operator, source_operator, u, dx, A, b);
 
     const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
 
