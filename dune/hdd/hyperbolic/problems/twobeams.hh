@@ -140,6 +140,7 @@ protected:
       A_str += "]";
       source_config["A.0"] = A_str;
       source_config["b.0"] = DSC::toString(RangeType(0));
+      source_config["sparse.0"] = "true";
     } // ... create_source_values(...)
 
     static std::string create_flux_matrix()
@@ -413,7 +414,7 @@ public:
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0]";
     grid_config["upper_right"] = "[1.0]";
-    grid_config["num_elements"] = "[1000]";
+    grid_config["num_elements"] = "[10000]";
     return grid_config;
   }
 
@@ -461,6 +462,7 @@ public:
     flux_config["type"] = DefaultFluxType::static_id();
     flux_config["A"] = GetData::create_flux_matrix();
     flux_config["b"] = DSC::toString(RangeType(0));
+    flux_config["sparse"] = "true";
     config.add(flux_config, "flux");
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
@@ -492,18 +494,18 @@ public:
     }
   } // ... default_config(...)
 
-  TwoBeams(const std::shared_ptr< const FluxType > flux,
-           const std::shared_ptr< const SourceType > source,
-           const std::shared_ptr< const FunctionType > initial_values,
-           const ConfigType& grid_config,
-           const ConfigType& boundary_info,
-           const std::shared_ptr< const BoundaryValueType > boundary_values)
-    : BaseType(flux,
-               source,
-               initial_values,
-               grid_config,
-               boundary_info,
-               boundary_values)
+  TwoBeams(const std::shared_ptr< const FluxType > flux_in,
+           const std::shared_ptr< const SourceType > source_in,
+           const std::shared_ptr< const FunctionType > initial_values_in,
+           const ConfigType& grid_config_in,
+           const ConfigType& boundary_info_in,
+           const std::shared_ptr< const BoundaryValueType > boundary_values_in)
+    : BaseType(flux_in,
+               source_in,
+               initial_values_in,
+               grid_config_in,
+               boundary_info_in,
+               boundary_values_in)
   {}
 }; // ... TwoBeams ...
 

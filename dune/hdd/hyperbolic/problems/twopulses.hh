@@ -170,18 +170,18 @@ public:
     }
   } // ... default_config(...)
 
-  TwoPulses(const std::shared_ptr< const FluxType > flux,
-           const std::shared_ptr< const SourceType > source,
-           const std::shared_ptr< const FunctionType > initial_values,
-           const ConfigType& grid_config,
-           const ConfigType& boundary_info,
-           const std::shared_ptr< const BoundaryValueType > boundary_values)
-    : BaseType(flux,
-               source,
-               initial_values,
-               grid_config,
-               boundary_info,
-               boundary_values)
+  TwoPulses(const std::shared_ptr< const FluxType > flux_in,
+            const std::shared_ptr< const SourceType > source_in,
+            const std::shared_ptr< const FunctionType > initial_values_in,
+            const ConfigType& grid_config_in,
+            const ConfigType& boundary_info_in,
+            const std::shared_ptr< const BoundaryValueType > boundary_values_in)
+    : BaseType(flux_in,
+               source_in,
+               initial_values_in,
+               grid_config_in,
+               boundary_info_in,
+               boundary_values_in)
   {}
 };
 

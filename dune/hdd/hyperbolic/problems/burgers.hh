@@ -121,18 +121,18 @@ public:
     }
   } // ... default_config(...)
 
-  Burgers(const std::shared_ptr< const FluxType > flux = std::make_shared< DefaultFluxType >(*DefaultFluxType::create(default_config().sub("flux"))),
-          const std::shared_ptr< const SourceType > source = std::make_shared< DefaultSourceType >(*DefaultSourceType::create(default_config().sub("source"))),
-          const std::shared_ptr< const FunctionType > initial_values = std::make_shared< DefaultFunctionType >(*DefaultFunctionType::create(default_config().sub("initial_values"))),
-          const ConfigType& grid_config = default_grid_config(),
-          const ConfigType& boundary_info = default_boundary_info_config(),
-          const std::shared_ptr< const BoundaryValueType > boundary_values = std::make_shared< DefaultBoundaryValueType >(*DefaultBoundaryValueType::create(default_config().sub("boundary_values"))))
-    : BaseType(flux,
-               source,
-               initial_values,
-               grid_config,
-               boundary_info,
-               boundary_values)
+  Burgers(const std::shared_ptr< const FluxType > flux_in = std::make_shared< DefaultFluxType >(*DefaultFluxType::create(default_config().sub("flux"))),
+          const std::shared_ptr< const SourceType > source_in = std::make_shared< DefaultSourceType >(*DefaultSourceType::create(default_config().sub("source"))),
+          const std::shared_ptr< const FunctionType > initial_values_in = std::make_shared< DefaultFunctionType >(*DefaultFunctionType::create(default_config().sub("initial_values"))),
+          const ConfigType& grid_config_in = default_grid_config(),
+          const ConfigType& boundary_info_in = default_boundary_info_config(),
+          const std::shared_ptr< const BoundaryValueType > boundary_values_in = std::make_shared< DefaultBoundaryValueType >(*DefaultBoundaryValueType::create(default_config().sub("boundary_values"))))
+    : BaseType(flux_in,
+               source_in,
+               initial_values_in,
+               grid_config_in,
+               boundary_info_in,
+               boundary_values_in)
   {}
 };
 
