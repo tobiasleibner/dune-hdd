@@ -11,7 +11,6 @@
 #include <memory>
 #include <iostream>
 #include <fstream>
-#include <chrono>
 
 #include <dune/common/parallel/mpihelper.hh>
 #include <dune/common/fvector.hh>
@@ -22,13 +21,10 @@
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/la/container/common.hh>
 
-#include <dune/gdt/localevaluation/laxfriedrichs.hh>
-#include <dune/gdt/spaces/fv/defaultproduct.hh>
-#include <dune/gdt/spaces/cg.hh>
-#include <dune/gdt/products/l2.hh>
 #include <dune/gdt/discretefunction/default.hh>
-#include <dune/gdt/operators/projections.hh>
 #include <dune/gdt/operators/advection.hh>
+#include <dune/gdt/operators/projections.hh>
+#include <dune/gdt/spaces/fv/defaultproduct.hh>
 #include <dune/gdt/timestepper/rungekutta.hh>
 
 #include <dune/hdd/hyperbolic/problems/twobeams.hh>
