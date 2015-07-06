@@ -414,7 +414,7 @@ public:
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0]";
     grid_config["upper_right"] = "[1.0]";
-    grid_config["num_elements"] = "[10000]";
+    grid_config["num_elements"] = "[1000]";
     return grid_config;
   }
 

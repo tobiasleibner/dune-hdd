@@ -112,12 +112,12 @@ int main(int argc, char* argv[])
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    double dt = 0.00005; //dx/4.0;
-    const double t_end = 0.1;
+    double dt = 0.0005; //dx/4.0;
+    const double t_end = 2;
     //create operator
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
-    typedef typename Dune::GDT::Operators::AdvectionGodunov
-            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
+    typedef typename Dune::GDT::Operators::AdvectionGodunovWithReconstruction
+            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType, Dune::GDT::Operators::SlopeLimiters::superbee > OperatorType;
     typedef typename Dune::GDT::Operators::AdvectionSource< SourceType, FVSpaceType > SourceOperatorType;
 
     //create butcher_array
