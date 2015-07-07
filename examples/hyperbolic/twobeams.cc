@@ -12,6 +12,9 @@
 #include <iostream>
 #include <fstream>
 
+#include <boost/timer/timer.hpp>
+#include <boost/filesystem.hpp>
+
 #include <dune/common/parallel/mpihelper.hh>
 #include <dune/common/fvector.hh>
 
@@ -40,13 +43,12 @@ int main(int argc, char* argv[])
 {
   typedef Dune::MPIHelper MPIHelper;
   MPIHelper::instance(argc, argv);
-//  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
+  //  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
   try {
-    // setup Profiler to get timings
-    DSC::Profiler& profiler_ref = DSC::profiler();
-    DS::threadManager().set_max_threads(8);
+    // setup threadmanager
+    DS::threadManager().set_max_threads(DSC::fromString< size_t >(argv[1]));
     DSC_CONFIG.set("threading.partition_factor", 1, true);
-    profiler_ref.startTiming("Solving");
+    // set dimensions
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
@@ -108,12 +110,12 @@ int main(int argc, char* argv[])
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    double dt = 0.0005; //dx/4.0;
-    const double t_end = 2;
+    double dt = 0.00005; //dx/4.0;
+    const double t_end = 0.2;
     //create operator
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
-    typedef typename Dune::GDT::Operators::AdvectionGodunovWithReconstruction
-            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType, Dune::GDT::Operators::SlopeLimiters::superbee > OperatorType;
+    typedef typename Dune::GDT::Operators::AdvectionGodunov
+            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
     typedef typename Dune::GDT::Operators::AdvectionSource< SourceType, FVSpaceType > SourceOperatorType;
 
     //create butcher_array
@@ -138,48 +140,62 @@ int main(int argc, char* argv[])
 //    }
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    //create timestepper
-    std::cout << "Creating TimeStepper..." << std::endl;
+    const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
+
+    //create Operators
     ConstantFunctionType dx_function(dx);
     OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
     SourceOperatorType source_operator(*source, fv_space);
+
+    //create timestepper
+    std::cout << "Creating TimeStepper..." << std::endl;
     Dune::GDT::TimeStepper::RungeKutta< OperatorType, SourceOperatorType, FVFunctionType, double > timestepper(advection_operator, source_operator, u, dx, A, b);
 
-    const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
-
     // now do the time steps
+    boost::timer::cpu_timer timer;
     timestepper.solve(t_end, dt, saveInterval);
-    profiler_ref.stopTiming("Solving");
-    std::cout << "Solving done, took " << profiler_ref.getTiming("Solving", false)/1000.0 << " seconds (walltime "
-                 << profiler_ref.getTiming("Solving", true)/1000.0 << " seconds)" << std::endl;
+    const auto duration = timer.elapsed();
+    std::cout << "took: " << duration.wall*1e-9 << " seconds" << std::endl;
 
-    // visualize solution
-    timestepper.visualize_solution();
-    // write solution to *.csv file
-    std::cout << "Writing solution to .csv file...";
-    remove((problem.static_id() + "_P" + DSC::toString(dimRange - 1) + "CGLegendre.csv").c_str());
-    std::ofstream output_file(problem.static_id() + "_P" + DSC::toString(dimRange - 1) + "CGLegendre.csv");
-    const auto solution = timestepper.solution();
-    // write first line
-    const auto it_end_2 = grid_view.template end< 0 >();
-    for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
-      const auto& entity = *it;
-      output_file << ", " << DSC::toString(entity.geometry().center()[0]);
-    }
-    output_file << std::endl;
-    for (auto& pair : solution) {
-      output_file << DSC::toString(pair.first);
-      const auto discrete_func = pair.second;
-      for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
-        const auto& entity = *it;
-        output_file << ", " << DSC::toString(discrete_func.local_discrete_function(entity)->evaluate(entity.geometry().local(entity.geometry().center()))[0]);
+      // write timings to file
+      const bool file_already_exists = boost::filesystem::exists("strong_scaling.csv");
+      std::ofstream output_file("strong_scaling.csv", std::ios_base::app);
+      if (!file_already_exists) { // write header
+      output_file << "Problem: " + problem.static_id()
+                  << ", dimRange = " << dimRange
+                  << ", number of grid cells: " << grid_config["num_elements"]
+                  << ", dt = " << DSC::toString(dt)
+                  << std::endl;
+      output_file << "num_processes, wall, user, system" << std::endl;
       }
-      output_file << std::endl;
-    }
-    output_file.close();
+      output_file << argv[1] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
+      output_file.close();
+
+//      // visualize solution
+//      timestepper.visualize_solution();
+//      // write solution to *.csv file
+//      std::cout << "Writing solution to .csv file...";
+//      remove((problem.static_id() + "_P" + DSC::toString(dimRange - 1) + "CGLegendre.csv").c_str());
+//      std::ofstream output_file(problem.static_id() + "_P" + DSC::toString(dimRange - 1) + "CGLegendre.csv");
+//      const auto solution = timestepper.solution();
+//      // write first line
+//      const auto it_end_2 = grid_view.template end< 0 >();
+//      for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
+//        const auto& entity = *it;
+//        output_file << ", " << DSC::toString(entity.geometry().center()[0]);
+//      }
+//      output_file << std::endl;
+//      for (auto& pair : solution) {
+//        output_file << DSC::toString(pair.first);
+//        const auto discrete_func = pair.second;
+//        for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
+//          const auto& entity = *it;
+//          output_file << ", " << DSC::toString(discrete_func.local_discrete_function(entity)->evaluate(entity.geometry().local(entity.geometry().center()))[0]);
+//        }
+//        output_file << std::endl;
+//      }
+//      output_file.close();
     std::cout << " done" << std::endl;
-
-
     return 0;
   } catch (Dune::Exception& e) {
     std::cerr << "Dune reported: " << e.what() << std::endl;
