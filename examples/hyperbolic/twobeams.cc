@@ -29,6 +29,7 @@
 #include <dune/gdt/operators/projections.hh>
 #include <dune/gdt/spaces/fv/defaultproduct.hh>
 #include <dune/gdt/timestepper/rungekutta.hh>
+//#include <dune/gdt/playground/functions/entropymomentfunction.hh>
 
 #include <dune/hdd/hyperbolic/problems/twobeams.hh>
 #include <dune/hdd/hyperbolic/problems/twopulses.hh>
@@ -69,6 +70,7 @@ int main(int argc, char* argv[])
 
     //get grid configuration from problem
     auto grid_config = problem.grid_config();
+    grid_config["num_elements"] = DSC::toString(1000*DSC::fromString< size_t >(argv[1]));
 
     //get analytical flux, initial and boundary values
     typedef typename ProblemType::FluxType              AnalyticalFluxType;
@@ -158,17 +160,17 @@ int main(int argc, char* argv[])
     std::cout << "took: " << duration.wall*1e-9 << " seconds" << std::endl;
 
       // write timings to file
-      const bool file_already_exists = boost::filesystem::exists("strong_scaling.csv");
-      std::ofstream output_file("strong_scaling.csv", std::ios_base::app);
+      const bool file_already_exists = boost::filesystem::exists("weak_scaling.csv");
+      std::ofstream output_file("weak_scaling.csv", std::ios_base::app);
       if (!file_already_exists) { // write header
       output_file << "Problem: " + problem.static_id()
                   << ", dimRange = " << dimRange
-                  << ", number of grid cells: " << grid_config["num_elements"]
+//                  << ", number of grid cells: " << grid_config["num_elements"]
                   << ", dt = " << DSC::toString(dt)
                   << std::endl;
-      output_file << "num_processes, wall, user, system" << std::endl;
+      output_file << "num_processes, num_grid_cells, wall, user, system" << std::endl;
       }
-      output_file << argv[1] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
+      output_file << argv[1] << ", " << grid_config["num_elements"] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
       output_file.close();
 
 //      // visualize solution
