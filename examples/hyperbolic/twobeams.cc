@@ -39,6 +39,7 @@
 #include <dune/hdd/hyperbolic/problems/rectangularic.hh>
 #include <dune/hdd/hyperbolic/problems/sourcebeam.hh>
 #include <dune/hdd/hyperbolic/problems/onebeam.hh>
+#include <dune/hdd/hyperbolic/problems/transport.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -170,13 +171,14 @@ int main(int argc, char* argv[])
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
-    static const size_t dimRange = 6;
+    static const size_t dimRange = 1;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
-    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
@@ -231,7 +233,8 @@ int main(int argc, char* argv[])
     const double CFL = 0.5;
     double dt = CFL*dx; //dx/4.0;
     const double t_end = 2;
-    //create operator
+
+    //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     typedef typename Dune::GDT::Operators::AdvectionGodunov
             < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
@@ -275,13 +278,14 @@ int main(int argc, char* argv[])
 //    std::unique_ptr< SolutionType > solution1, solution2;
 
     // solve five times to average timings
-//    for (size_t run = 0; run < 5; ++run) {
+    for (size_t run = 0; run < 5; ++run) {
     // now do the time steps
     timestepper.reset();
 
 //    boost::timer::cpu_timer timer;
     DSC_PROFILER.startTiming("fv.solve");
-    timestepper.solve(t_end, dt, saveInterval);
+    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
+    timestepper.solve(t_end, dt, saveInterval, solution_as_discrete_function);
     DSC_PROFILER.stopTiming("fv.solve");
 //    const auto duration = timer.elapsed();
 //    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
@@ -303,9 +307,14 @@ int main(int argc, char* argv[])
 //      output_file.close();
 
       // visualize solution
-      timestepper.visualize_solution();
+//      timestepper.visualize_solution();
 //    }
-
+    for (size_t ii = 0; ii < solution_as_discrete_function.size(); ++ii) {
+      auto& pair = solution_as_discrete_function[ii];
+      pair.second.template visualize_factor< 0 >("prefix_factor_" + DSC::toString(run)
+                                                                       + "_" + DSC::toString(ii), true);
+    }
+}
       // write solution to *.csv file
       write_solution_to_csv(grid_view, timestepper.solution(), problem.short_id() + "_P" + DSC::toString(dimRange - 1) + "_n" + DSC::toString(1.0/dx) + "_CFL" + DSC::toString(CFL) + "_CGLegendre_fractional_exact.csv");
 

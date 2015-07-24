@@ -41,9 +41,44 @@
 using namespace Dune::GDT;
 using namespace Dune::HDD;
 
-int main()
+int main(int argc, char** argv)
 {
   try {
+    // setup MPI
+    typedef Dune::MPIHelper MPIHelper;
+    MPIHelper::instance(argc, argv);
+    //  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
+
+    // parse options
+    if (argc < 3) {
+      std::cerr << "Usage: " << argv[0] << "-threading.max_count [-gridsize GRIDSIZE]" << std::endl;
+      return 1;
+    }
+    size_t num_threads;
+    std::string grid_size = "1000";
+    for (int i = 1; i < argc; ++i) {
+      if (std::string(argv[i]) == "-threading.max_count") {
+        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+          num_threads = DSC::fromString< size_t >(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+          DS::threadManager().set_max_threads(num_threads);
+        } else {
+          std::cerr << "-threading.max_count option requires one argument." << std::endl;
+          return 1;
+        }
+      } else if (std::string(argv[i]) == "-gridsize") {
+        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+          grid_size = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
+        } else {
+          std::cerr << "-gridsize option requires one argument." << std::endl;
+          return 1;
+        }
+      }
+    }
+
+    // setup threadmanager
+    DSC_CONFIG.set("threading.partition_factor", 1, true);
+
+
     static const size_t dimDomain = 1;
     static const size_t dimRange = 1;
     //choose GridType
@@ -53,8 +88,8 @@ int main()
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
 
     //configure Problem
-    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Burgers< EntityType, double, dimDomain, double, dimRange > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::ShallowWater< EntityType, double, dimDomain, double, dimRange > ProblemType;
 
     //create Problem
@@ -119,13 +154,12 @@ int main()
     double dt = dx/8.0;
     const double t_end = 1;
 
-    //create operator
+    //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
-    typedef typename Dune::GDT::Operators::AdvectionGodunovWithReconstruction< AnalyticalFluxType,
-                                                                               ConstantFunctionType,
-                                                                               BoundaryValueType,
-                                                                               FVSpaceType,
-                                                                               Dune::GDT::Operators::SlopeLimiters::mc > OperatorType;
+    typedef typename Dune::GDT::Operators::AdvectionGodunov
+            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
+    typedef typename Dune::GDT::Operators::AdvectionSource< SourceType, FVSpaceType > SourceOperatorType;
+    typedef typename Dune::GDT::TimeStepper::RungeKutta< OperatorType, SourceOperatorType, FVFunctionType, double > TimeStepperType;
 
     //create butcher_array
     // forward euler
@@ -139,12 +173,13 @@ int main()
 //    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 
 
-    search suitable time step length
+    // search suitable time step length
     std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
     while (!(dtpair.first)) {
       ConstantFunctionType dx_function(dx);
       OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
-      Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
+      SourceOperatorType source_operator(*source, fv_space);
+          TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
       dtpair = timestepper.find_suitable_dt(dt, 2, 500, 200);
       dt = dtpair.second;
     }
@@ -153,12 +188,15 @@ int main()
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
     ConstantFunctionType dx_function(dx);
-    OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, false);
-    Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
+    OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
+    SourceOperatorType source_operator(*source, fv_space);
+    TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
 
     const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
     // now do the time steps
-    timestepper.solve(t_end, dt, saveInterval, true);
+    timestepper.solve(t_end, dt, saveInterval);
+
+    timestepper.visualize_solution("burgers");
 
     std::cout << "Finished!!\n";
 
