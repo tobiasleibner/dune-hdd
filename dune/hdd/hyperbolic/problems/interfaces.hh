@@ -42,7 +42,7 @@ public:
                                                               FluxSourceEntityType, RangeFieldType, dimRange,
                                                               RangeFieldType, dimRange, 1 >             SourceType;
   typedef Dune::Stuff::GlobalFunctionValuedFunctionInterface< EntityType, DomainFieldType, dimDomain,
-                                                              EntityType, RangeFieldType, dimDomain,
+                                                              EntityType, DomainFieldType, dimDomain,
                                                               RangeFieldType, dimRange, 1 >             FunctionType;
   typedef typename Dune::Stuff::Functions::TimeDependentExpression
                 < EntityImp, DomainFieldImp, dimDomain, RangeFieldImp, dimRange, 1, double > BoundaryValueType;
@@ -71,12 +71,6 @@ public:
   virtual const ConfigType boundary_info() const = 0;
 
   virtual const std::shared_ptr< const BoundaryValueType >& boundary_values() const = 0;
-
-  template< class G >
-  void visualize(/*const GridView< G >& grid_view, std::string filename, other types*/) const
-  {
-    // TODO: implement
-  } // ... visualize(...) const
 
   virtual void report(std::ostream& out, std::string prefix = "") const
   {

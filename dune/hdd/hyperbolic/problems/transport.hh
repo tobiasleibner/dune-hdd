@@ -10,8 +10,6 @@
 #include <vector>
 #include <string>
 
-#include <dune/common/static_assert.hh>
-
 #include "default.hh"
 
 namespace Dune {
@@ -28,7 +26,15 @@ class Transport
   typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > BaseType;
 
 public:
-  using typename BaseType::DefaultFluxType;
+  using BaseType::dimDomain;
+  using BaseType::dimRange;
+  using typename BaseType::FluxSourceEntityType;
+  typedef typename Dune::Stuff::Functions::Affine< FluxSourceEntityType,
+                                                   RangeFieldImp,
+                                                   dimRange,
+                                                   RangeFieldImp,
+                                                   dimRange,
+                                                   dimDomain >                      DefaultFluxType;
   using typename BaseType::DefaultFunctionType;
   using typename BaseType::DefaultSourceType;
   using typename BaseType::DefaultBoundaryValueType;
@@ -39,9 +45,6 @@ public:
   using typename BaseType::BoundaryValueType;
   using typename BaseType::ConfigType;
 
-  using BaseType::dimDomain;
-  using BaseType::dimRange;
-
   static std::string static_id()
   {
     return BaseType::static_id() + ".transport";
@@ -50,6 +53,11 @@ public:
   std::string type() const
   {
     return BaseType::type() + ".transport";
+  }
+
+  static std::string short_id()
+  {
+    return "Transport";
   }
 
 protected:
@@ -92,13 +100,9 @@ public:
     config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = DefaultFluxType::static_id();
-    flux_config["variable"] = "u";
-    flux_config["expression"] = "[u[0] u[0] 3*u[0]; 4*u[0] 5*u[0] 6*u[0]; 7*u[0] 8*u[0] 9*u[0]]";
-    flux_config["order"] = "1";
-    flux_config["gradient"] = "[1 0 0; 4 0 0; 7 0 0]";
-    flux_config["gradient.0"] = "[1 0 0; 4 0 0; 7 0 0]";
-    flux_config["gradient.1"] = "[1 0 0; 5 0 0; 8 0 0]";
-    flux_config["gradient.2"] = "[3 0 0; 6 0 0; 9 0 0]";
+    flux_config["A.0"] = "[1]";
+    flux_config["A.1"] = "[2]";
+    flux_config["b"] = "[0 0; 0 0]";
     config.add(flux_config, "flux", true);
     ConfigType initial_value_config = DefaultFunctionType::default_config();
 //    initial_value_config["type"] = DefaultFunctionType::static_id();

@@ -10,8 +10,6 @@
 #include <vector>
 #include <string>
 
-#include <dune/common/static_assert.hh>
-
 #include "default.hh"
 
 namespace Dune {

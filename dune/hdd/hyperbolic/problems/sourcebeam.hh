@@ -54,6 +54,11 @@ public:
     return BaseType::type() + ".sourcebeam";
   }
 
+  static std::string short_id()
+  {
+    return "SourceBeam";
+  }
+
 protected:
   class GetData
       : BaseType::GetData
@@ -65,6 +70,7 @@ protected:
     using GetDataBaseType::M_inverse;
     using GetDataBaseType::base_integrated;
     using GetDataBaseType::basefunctions_values_at_plusone;
+    using GetDataBaseType::precision;
 
     // q - (sigma_a + T/2*S*M^(-1))*u = Q(x)*base_integrated() - (sigma_a(x)*I_{nxn} + T(x)/2*S*M_inverse)*u = q(x) - A(x)*u
     // sigma_a = 1 if x <= 2, 0 else
@@ -105,12 +111,12 @@ protected:
                   A_str += "0";
               } else if (ii == 2 || ii == 3) {                         // 1 <= x <= 2
                 if (cc == rr)
-                  A_str += DSC::toString(-1.0 - cc*(cc+1));
+                  A_str += DSC::toString(-1.0 - cc*(cc+1), precision);
                 else
                   A_str += "0";
               } else {                                                  // 2 <= x <= 3
                 if (cc == rr)
-                  A_str += DSC::toString(-5.0*cc*(cc+1));
+                  A_str += DSC::toString(-5.0*cc*(cc+1), precision);
                 else
                   A_str += "0";
               }
@@ -120,6 +126,8 @@ protected:
           q_str += "]";
           source_config["A." + DSC::toString(ii)] = A_str;
           source_config["b." + DSC::toString(ii)] = q_str;
+//          std::cout << "A." << DSC::toString(ii) <<  ": " << A_str << std::endl;
+//          std::cout << "q." << DSC::toString(ii) <<  ": " << q_str << std::endl;
         }
       } else {
         MatrixType S_M_inverse(S());
@@ -128,11 +136,12 @@ protected:
           std::string A_str = "[";
           std::string q_str = "[";
           if (ii == 2)                                           // 1 <= x <= 1.5
-            q_str = DSC::toString(base_integrated());
+            q_str = DSC::toString(base_integrated(), precision);
           for (size_t rr = 0; rr < dimRange; ++rr) {
             if (rr > 0) {
               A_str += "; ";
-              q_str += " ";
+              if (ii != 2)
+                q_str += " ";
             }
             if (ii != 2)
               q_str += "0";
@@ -146,11 +155,11 @@ protected:
                   A_str += "0";
               } else if (ii == 2 || ii == 3) {                         // 1 <= x <= 2
                 if (cc == rr)
-                  A_str += DSC::toString(-1.0 - S_M_inverse[rr][cc]);
+                  A_str += DSC::toString(-1.0 - S_M_inverse[rr][cc], precision);
                 else
-                  A_str += DSC::toString(-S_M_inverse[rr][cc]);
+                  A_str += DSC::toString(-S_M_inverse[rr][cc], precision);
               } else {                                                  // 2 <= x <= 3
-                A_str += DSC::toString(-5.0*S_M_inverse[rr][cc]);
+                A_str += DSC::toString(-5.0*S_M_inverse[rr][cc], precision);
               }
             }
           }
@@ -158,12 +167,15 @@ protected:
           q_str += "]";
           source_config["A." + DSC::toString(ii)] = A_str;
           source_config["b." + DSC::toString(ii)] = q_str;
+//          std::cout << "A." << DSC::toString(ii) <<  ": " << A_str << std::endl;
+//          std::cout << "q." << DSC::toString(ii) <<  ": " << q_str << std::endl;
+
         }
       }
     } // ... create_source_values()
 
     // boundary value of kinetic equation is delta(v-1) at x = 0 and 10^(-4) at x = 3,
-    // so k-th component of boundary value has to be \phi_k(1) at x = 0 and 10^(-4)*base_integrated_k at x = 3
+    // so k-th component of boundary value has to be 0.5*\phi_k(1) at x = 0 and 0.5*10^(-4)*base_integrated_k at x = 3
     // for Legendre polynomials, this is [0.5 0.5 0.5 ...] at x = 0 and [0.0002 0 0 ... ] at x = 3
     // simulate with linear interpolating function
     static std::string create_boundary_values()
@@ -179,6 +191,7 @@ protected:
             str += "0.5-0.5*x[0]/3.0";
         }
         str += "]";
+//        std::cout << str << std::endl;
         return str;
       } else {
         const auto& basefunctions_right = basefunctions_values_at_plusone();
@@ -186,9 +199,10 @@ protected:
         for (size_t cc = 0; cc < dimRange; ++cc) {
           if (cc > 0)
             str += " ";
-          str += DSC::toString(basefunctions_right[cc]) + "+" + DSC::toString(0.0001*(base_integrated()[cc]) - basefunctions_right[cc]) + "*x[0]/3.0";
+          str += DSC::toString(0.5*basefunctions_right[cc], precision) + "+(" + DSC::toString(0.5*0.0001*(base_integrated()[cc]) - 0.5*basefunctions_right[cc], precision) + ")*x[0]/3.0";
         }
         str += "]";
+//        std::cout << str << std::endl;
         return str;
       }
     } // ... create_boundary_values()
@@ -237,7 +251,7 @@ public:
     config.add(default_boundary_info_config(), "boundary_info", true);
     ConfigType source_config = DefaultSourceType::default_config();
     source_config["lower_left"] = "[0.0]";
-    source_config["upper_right"] = "[1.0]";
+    source_config["upper_right"] = "[3.0]";
     source_config["num_elements"] = "[6]";
     GetData::create_source_values(source_config);
     source_config["name"] = static_id();

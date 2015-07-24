@@ -17,6 +17,7 @@
 #include <dune/stuff/common/string.hh>
 #include <dune/stuff/functions/affine.hh>
 #include <dune/stuff/grid/provider/cube.hh>
+#include <dune/gdt/playground/functions/entropymomentfunction.hh>
 
 #include "default.hh"
 
@@ -74,6 +75,7 @@ public:
                                                    RangeFieldImp,
                                                    dimRange,
                                                    dimDomain >                      DefaultFluxType;
+//  typedef typename DS::Functions::EntropyMomentFlux< FluxSourceEntityType, RangeFieldImp, dimRange, RangeFieldImp, dimRange, dimDomain > DefaultFluxType;
   typedef typename DefaultFluxType::RangeType                                       RangeType;
   typedef typename DefaultFluxType::MatrixType                                      MatrixType;
   using typename BaseType::DefaultFunctionType;
@@ -101,10 +103,40 @@ public:
     return BaseType::type() + ".twobeams";
   }
 
+
+  static std::string short_id()
+  {
+    return "2Beams";
+  }
+
 protected:
   class GetData
   {
   public:
+    typedef DomainFieldImp                                                            VelocityFieldImp;
+    typedef typename Dune::SGrid< dimDomain, dimDomain, VelocityFieldImp >            VelocityGridType;
+    typedef Dune::Stuff::Grid::Providers::Cube< VelocityGridType >                    VelocityGridProviderType;
+    typedef typename VelocityGridType::LeafGridView                                   VelocityGridViewType;
+    typedef typename VelocityGridType::template Codim< 0 >::Entity                    VelocityEntityType;
+    typedef typename DS::LocalizableFunctionInterface< VelocityEntityType,
+                                                       VelocityFieldImp, dimDomain,
+                                                       RangeFieldImp, 1, 1 >          VelocityFunctionType;
+    typedef typename DS::Functions::Expression< VelocityEntityType,
+                                                VelocityFieldImp, dimDomain,
+                                                RangeFieldImp, 1, 1 >                 VelocityExpressionFunctionType;
+
+    typedef typename Dune::Stuff::LA::CommonDenseVector< RangeFieldImp >              VectorType;
+    typedef typename Dune::GDT::Spaces::CGProvider< VelocityGridType,
+                                                    DSG::ChooseLayer::leaf,
+                                                    Dune::GDT::ChooseSpaceBackend::pdelab,
+                                                    1, RangeFieldImp, 1, 1 >          CGProviderType;
+    typedef typename CGProviderType::Type                                             CGSpaceType;
+    typedef Dune::GDT::DiscreteFunction< CGSpaceType, VectorType >                    CGFunctionType;
+    typedef typename DS::Functions::Checkerboard< typename VelocityGridType::template Codim< 0 >::Entity,
+                                                  DomainFieldImp, dimDomain,
+                                                  RangeFieldImp, 1, 1 >               CGJacobianType;
+    static const int precision = 15; // precision for toString
+
     static void set_filename(const std::string filename)
     {
       filename_ = filename;
@@ -118,6 +150,18 @@ protected:
     static const bool& exact_legendre()
     {
       return exact_legendre_;
+    }
+
+    static const std::vector< CGFunctionType >& basefunctions()
+    {
+      calculate();
+      return basefunctions_;
+    }
+
+    static std::shared_ptr< const VelocityGridViewType > velocity_grid_view()
+    {
+      calculate();
+      return velocity_grid_view_;
     }
 
     // q - (sigma_a + T/2*S*M^(-1))*u = Q(x)*base_integrated() - (sigma_a(x)*I_{nxn} + T(x)/2*S*M_inverse)*u = q - A*u
@@ -143,6 +187,10 @@ protected:
       source_config["sparse.0"] = "true";
     } // ... create_source_values(...)
 
+    // flux matrix is D*M^(-1)
+    // for legendre polynomials, using a recursion relation gives D*M^(-1)[cc][rr] = rr/(2*rr + 1)       if cc == rr - 1
+    //                                                                             = (rr + 1)/(2*rr + 1) if cc == rr + 1
+    //                                                                             = 0                   else
     static std::string create_flux_matrix()
     {
       if (exact_legendre()) {
@@ -154,9 +202,9 @@ protected:
             if (cc > 0)
               str += " ";
             if (cc == rr - 1)
-              str += DSC::toString(double(rr)/(2.0*double(rr)+1.0));
+              str += DSC::toString(double(rr)/(2.0*double(rr)+1.0), precision);
             else if (cc == rr + 1)
-              str += DSC::toString((double(rr)+1.0)/(2.0*double(rr)+1.0));
+              str += DSC::toString((double(rr)+1.0)/(2.0*double(rr)+1.0), precision);
             else
               str += "0";
           }
@@ -165,7 +213,7 @@ protected:
         return str;
       } else {
         MatrixType D_M_inverse(M_inverse());
-        return DSC::toString(D_M_inverse.leftmultiply(D()));
+        return DSC::toString(D_M_inverse.leftmultiply(D()), precision);
       }
     } // ... create_flux_matrix()
 
@@ -191,7 +239,7 @@ protected:
         for (size_t rr = 0; rr < dimRange; ++rr) {
           if (rr > 0)
             str += " ";
-          str += DSC::toString(0.0001*base_integrated()[rr]);
+          str += DSC::toString(0.0001*base_integrated()[rr], precision);
         }
         str += "]";
         return str;
@@ -210,7 +258,7 @@ protected:
         for (size_t rr = 0; rr < dimRange; ++rr) {
           if (rr > 0)
             str += " ";
-          str += "50*(" + DSC::toString(((1.0-2.0*(rr%2)) - 1.0)) + "*x[0]+1)";
+          str += "50*(" + DSC::toString(((1.0-2.0*(rr%2)) - 1.0), precision) + "*x[0]+1)";
         }
         str += "]";
         return str;
@@ -219,9 +267,9 @@ protected:
         for (size_t rr = 0; rr < dimRange; ++rr) {
           if (rr > 0)
             str += " ";
-          str += DSC::toString(50*(basefunctions_values_at_minusone()[rr] - basefunctions_values_at_plusone()[rr]))
+          str += DSC::toString(50*(basefunctions_values_at_minusone()[rr] - basefunctions_values_at_plusone()[rr]), precision)
                  + "*x[0]+"
-                 + DSC::toString(50*basefunctions_values_at_plusone()[rr]);
+                 + DSC::toString(50*basefunctions_values_at_plusone()[rr], precision);
         }
         str += "]";
         return str;
@@ -278,29 +326,6 @@ protected:
     }
 
   private:
-    typedef DomainFieldImp                                                            VelocityFieldImp;
-    typedef typename Dune::SGrid< dimDomain, dimDomain, VelocityFieldImp >            VelocityGridType;
-    typedef Dune::Stuff::Grid::Providers::Cube< VelocityGridType >                    VelocityGridProviderType;
-    typedef typename VelocityGridType::LeafGridView                                   VelocityGridViewType;
-    typedef typename VelocityGridType::template Codim< 0 >::Entity                    VelocityEntityType;
-    typedef typename DS::LocalizableFunctionInterface< VelocityEntityType,
-                                                       VelocityFieldImp, dimDomain,
-                                                       RangeFieldImp, 1, 1 >          VelocityFunctionType;
-    typedef typename DS::Functions::Expression< VelocityEntityType,
-                                                VelocityFieldImp, dimDomain,
-                                                RangeFieldImp, 1, 1 >                 VelocityExpressionFunctionType;
-
-    typedef typename Dune::Stuff::LA::CommonDenseVector< RangeFieldImp >              VectorType;
-    typedef typename Dune::GDT::Spaces::CGProvider< VelocityGridType,
-                                                    DSG::ChooseLayer::leaf,
-                                                    Dune::GDT::ChooseSpaceBackend::pdelab,
-                                                    1, RangeFieldImp, 1, 1 >          CGProviderType;
-    typedef typename CGProviderType::Type                                             CGSpaceType;
-    typedef Dune::GDT::DiscreteFunction< CGSpaceType, VectorType >                    CGFunctionType;
-    typedef typename DS::Functions::Checkerboard< typename VelocityGridType::template Codim< 0 >::Entity,
-                                                  DomainFieldImp, dimDomain,
-                                                  RangeFieldImp, 1, 1 >               CGJacobianType;
-
     static void calculate()
     {
       if (!is_calculated_) {
@@ -326,23 +351,22 @@ protected:
         velocity_grid_config["upper_right"] = "[1.0]";
         velocity_grid_config["num_elements"] = "[" + DSC::toString(basefunction_values[0].size() - 1) + "]";
         VelocityGridProviderType velocity_grid_provider = *(VelocityGridProviderType::create(velocity_grid_config));
-        const std::shared_ptr< const VelocityGridType > velocity_grid = velocity_grid_provider.grid_ptr();
+        velocity_grid_ = velocity_grid_provider.grid_ptr();
 
         // make CG Space with polOrder 1 and DiscreteFunctions for the base functions
-        const VelocityGridViewType velocity_grid_view = velocity_grid->leafGridView();
+        velocity_grid_view_ = std::make_shared< VelocityGridViewType >(velocity_grid_->leafGridView());
 
         CGSpaceType cg_space = CGProviderType::create(velocity_grid_provider);
 
         // create basefunctions from values at the DOFs
-        std::vector< CGFunctionType > basefunctions;
         for (size_t ii = 0; ii < dimRange; ++ii) {
-          VectorType basefunction_ii_values(velocity_grid_view.size(0) + 1);
+          VectorType basefunction_ii_values(velocity_grid_view_->size(0) + 1);
           for (size_t jj = 0; jj < basefunction_values[ii].size(); ++jj) {
             basefunction_ii_values[jj] = DSC::fromString< RangeFieldImp >(basefunction_values[ii][jj]);
           }
           basefunctions_values_at_minusone_[ii] = basefunction_ii_values[0];
-          basefunctions_values_at_plusone_[ii] = basefunction_ii_values[velocity_grid_view.size(0)];
-          basefunctions.emplace_back(CGFunctionType(cg_space,
+          basefunctions_values_at_plusone_[ii] = basefunction_ii_values[velocity_grid_view_->size(0)];
+          basefunctions_.emplace_back(CGFunctionType(cg_space,
                                                     basefunction_ii_values,
                                                     "Basefunction " + DSC::toString(ii)));
         }
@@ -351,22 +375,22 @@ protected:
         std::vector< CGJacobianType > basefunction_jacobians;
         std::vector< std::vector< typename CGJacobianType::RangeType > > basefunction_jacobians_values(dimRange);
         for (size_t ii = 0; ii < dimRange; ++ii) {
-          basefunction_jacobians_values[ii].resize(velocity_grid_view.size(0));
+          basefunction_jacobians_values[ii].resize(velocity_grid_view_->size(0));
         }
-        const auto it_end = velocity_grid_view.template end< 0 >();
-        for (auto it = velocity_grid_view.template begin< 0 >(); it != it_end; ++it) {
+        const auto it_end = velocity_grid_view_->template end< 0 >();
+        for (auto it = velocity_grid_view_->template begin< 0 >(); it != it_end; ++it) {
           const auto& entity = *it;
           for (size_t ii = 0; ii < dimRange; ++ii) {
-            // basefunctions[ii].jacobian(..) gives a 1x1 FieldMatrix
-            basefunction_jacobians_values[ii][velocity_grid_view.indexSet().index(entity)]
-                = (basefunctions[ii].local_function(entity)->jacobian(entity.geometry().local(entity.geometry().center())))[0][0];
+            // basefunctions_[ii].jacobian(..) gives a 1x1 FieldMatrix
+            basefunction_jacobians_values[ii][velocity_grid_view_->indexSet().index(entity)]
+                = (basefunctions_[ii].local_function(entity)->jacobian(entity.geometry().local(entity.geometry().center())))[0][0];
           }
         }
 
         for (size_t ii = 0; ii < dimRange; ++ii) {
           const CGJacobianType jacobian_ii(DomainType(-1),
                                            DomainType(1),
-                                           DSC::FieldVector< size_t, dimDomain >(velocity_grid_view.size(0)),
+                                           DSC::FieldVector< size_t, dimDomain >(velocity_grid_view_->size(0)),
                                            basefunction_jacobians_values[ii]);
           basefunction_jacobians.emplace_back(jacobian_ii);
         }
@@ -375,19 +399,19 @@ protected:
         VelocityExpressionFunctionType v("v", "v[0]", 1);
         VelocityExpressionFunctionType onebeam_left_boundary("v", "3*exp(3*v[0]+3)/(exp(6)-1)", 10);
         VelocityExpressionFunctionType one_minus_v_squared("v", "1-(v[0]^2)", 2);
-        const typename Dune::GDT::Products::L2< VelocityGridViewType, RangeFieldImp > l2_product(velocity_grid_view);
+        const typename Dune::GDT::Products::L2< VelocityGridViewType, RangeFieldImp > l2_product(*velocity_grid_view_);
         for (size_t ii = 0; ii < dimRange; ++ii) {
-          // Note: this assumes basefunctions[0] is the constant function with value 1!!
-          base_integrated_[ii] = l2_product.apply2(basefunctions[0], basefunctions[ii]);
-          onebeam_left_boundary_values_[ii] = l2_product.apply2(onebeam_left_boundary, basefunctions[ii]);
+          // Note: this assumes basefunctions_[0] is the constant function with value 1!!
+          base_integrated_[ii] = l2_product.apply2(basefunctions_[0], basefunctions_[ii]);
+          onebeam_left_boundary_values_[ii] = l2_product.apply2(onebeam_left_boundary, basefunctions_[ii]);
           for (size_t jj = 0; jj < dimRange; ++jj) {
-            M_[ii][jj] = l2_product.apply2(basefunctions[jj], basefunctions[ii]);
+            M_[ii][jj] = l2_product.apply2(basefunctions_[jj], basefunctions_[ii]);
             const auto v_times_base = DS::Functions::Product< VelocityFunctionType,
-                                                              CGFunctionType >(v, basefunctions[jj]);
+                                                              CGFunctionType >(v, basefunctions_[jj]);
             const auto jacobian_times_one_minus_v_squared
                 = DS::Functions::Product< VelocityFunctionType, CGJacobianType >(one_minus_v_squared,
                                                                                  basefunction_jacobians[jj]);
-            D_[ii][jj] = l2_product.apply2(v_times_base, basefunctions[ii]);
+            D_[ii][jj] = l2_product.apply2(v_times_base, basefunctions_[ii]);
             S_[ii][jj] = l2_product.apply2(jacobian_times_one_minus_v_squared, basefunction_jacobians[ii]);
           }
         }
@@ -405,6 +429,9 @@ protected:
     static std::string filename_;
     static bool exact_legendre_;
     static RangeType onebeam_left_boundary_values_;
+    static std::vector< CGFunctionType > basefunctions_;
+    static std::shared_ptr< const VelocityGridType > velocity_grid_;
+    static std::shared_ptr< const VelocityGridViewType > velocity_grid_view_;
   };
 
 public:
@@ -414,7 +441,7 @@ public:
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[0.0]";
     grid_config["upper_right"] = "[1.0]";
-    grid_config["num_elements"] = "[10000]";
+    grid_config["num_elements"] = "[1000]";
     return grid_config;
   }
 
@@ -430,6 +457,16 @@ public:
   {
     const ConfigType config = cfg.has_sub(sub_name) ? cfg.sub(sub_name) : cfg;
     const std::shared_ptr< const DefaultFluxType > flux(DefaultFluxType::create(config.sub("flux")));
+    RangeType alpha;
+    alpha[0] = std::log(2);
+//    const std::shared_ptr< const DefaultFluxType > flux
+//        = std::make_shared< const DefaultFluxType >(GetData::velocity_grid_view(),
+//                                                    GetData::basefunctions(),
+//                                                    alpha,
+//                                                    0.5,
+//                                                    10e-8,
+//                                                    0.01,
+//                                                    0.001);
     const std::shared_ptr< const DefaultSourceType > source(DefaultSourceType::create(config.sub("source")));
     const std::shared_ptr< const DefaultFunctionType > initial_values(DefaultFunctionType::create(config.sub("initial_values")));
     const ConfigType grid_config = config.sub("grid");
@@ -461,6 +498,7 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = DefaultFluxType::static_id();
     flux_config["A"] = GetData::create_flux_matrix();
+    std::cout << flux_config["A"] << std::endl;
     flux_config["b"] = DSC::toString(RangeType(0));
     flux_config["sparse"] = "true";
     config.add(flux_config, "flux");
@@ -552,6 +590,18 @@ TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetDa
 template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
 typename TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::RangeType
 TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::onebeam_left_boundary_values_(rangeDim);
+
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
+std::vector< typename TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::CGFunctionType >
+TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::basefunctions_;
+
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
+std::shared_ptr< const typename TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::VelocityGridViewType >
+TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::velocity_grid_view_;
+
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
+std::shared_ptr< const typename TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::VelocityGridType >
+TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >::GetData::velocity_grid_;
 
 } // namespace Problems
 } // namespace Hyperbolic
