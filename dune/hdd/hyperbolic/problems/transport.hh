@@ -114,9 +114,20 @@ public:
 //    initial_value_config["order"] = "10";
     initial_value_config["lower_left"] = "[0.0 0.0 0.0]";
     initial_value_config["upper_right"] = "[1.0 1.0 1.0]";
-    initial_value_config["num_elements"] = "[5 1 1]";
+    if (dimDomain == 1)
+      initial_value_config["num_elements"] = "[5]";
+    else
+      initial_value_config["num_elements"] = "[5 5 1]";
     initial_value_config["variable"] = "x";
-    initial_value_config["values"] = "[0 sin(pi/2+5*pi*(x[0]-0.3))*exp(-(200*(x[0]-0.3)*(x[0]-0.3))) 0 1.0 0.0]";
+    if (dimDomain == 1)
+      initial_value_config["values"] = "[0.0 10000*((x[0]-0.2)^2)*((x[0]-0.4)^2)*exp(0.02-((x[0]-0.2)^2)-((x[0]-0.4)^2)) 0.0 1.0 0.0]"; //"[0 sin(pi/2+5*pi*(x[0]-0.3))*exp(-(200*(x[0]-0.3)*(x[0]-0.3))) 0 1.0 0.0]";
+    else
+      initial_value_config["values"] = std::string("[0 0 0 0 0 ") +
+                                       std::string( "0 10000*((x[0]-0.2)^2)*((x[0]-0.4)^2)*exp(0.02-((x[0]-0.2)^2)-((x[0]-0.4)^2))*10000*((x[1]-0.2)^2)*((x[1]-0.4)^2)*exp(0.02-((x[1]-0.2)^2)-((x[1]-0.4)^2)) 0 0 0 ") +
+                                       std::string( "0 0 0 0 0 ") +
+                                       std::string( "0 0 0 1 0 ") +
+                                       std::string( "0 0 0 0 0]");
+    initial_value_config["order"] = "10";
     initial_value_config["name"] = static_id();
     config.add(initial_value_config, "initial_values", true);
     if (sub_name.empty())
