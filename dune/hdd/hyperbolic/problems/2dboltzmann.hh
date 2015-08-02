@@ -127,13 +127,13 @@ protected:
           if (l > 0) {
             X[row][pos(l - 1, m - 1)] = -0.5*C(l - 1, m - 1);
             if (m < l - 1)
-              X[row][pos(l - 1, m + 1)] = E(l - 1, m + 1);
+              X[row][pos(l - 1, m + 1)] = 0.5*E(l - 1, m + 1);
             if (m < l)
               Z[row][pos(l - 1, m)] = A(l - 1, m);
           }
           if (l < momentOrder) {
             X[row][pos(l + 1, m - 1)] =  0.5*D(l + 1, m - 1);
-            X[row][pos(l + 1, m + 1)] = F(l + 1, m + 1);
+            X[row][pos(l + 1, m + 1)] = -0.5*F(l + 1, m + 1);
             Z[row][pos(l + 1, m)] = B(l + 1, m);
           }
         }

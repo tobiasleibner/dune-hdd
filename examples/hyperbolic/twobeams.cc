@@ -241,8 +241,8 @@ int main(int argc, char* argv[])
     //calculate dx and choose t_end and initial dt
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
-    const double dx = 0.01; //dimensions.entity_width.max();
-    const double CFL = 0.01;
+    const double dx = 7.0/DSC::fromString< double >(grid_size); //dimensions.entity_width.max();
+    const double CFL = 0.5;
     double dt = CFL*dx; //dx/4.0;
     const double t_end = 3.2;
 
