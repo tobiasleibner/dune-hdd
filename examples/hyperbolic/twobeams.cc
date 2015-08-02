@@ -40,6 +40,8 @@
 #include <dune/hdd/hyperbolic/problems/sourcebeam.hh>
 #include <dune/hdd/hyperbolic/problems/onebeam.hh>
 #include <dune/hdd/hyperbolic/problems/transport.hh>
+#include <dune/hdd/hyperbolic/problems/2dboltzmann.hh>
+#include <dune/hdd/hyperbolic/problems/2dboltzmanncheckerboard.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -168,28 +170,38 @@ int main(int argc, char* argv[])
     // setup threadmanager
     DSC_CONFIG.set("threading.partition_factor", 1, true);
     // set dimensions
-    static const size_t dimDomain = 1;
+    static const size_t dimDomain = 2;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
-    static const size_t dimRange = 1;
+    // for Boltzmann2D, this is not dimRange but the maximal moment order
+    static const size_t momentOrder = 15;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
-    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, dimRange > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Boltzmann2DLineSource< EntityType, double, dimDomain, double, momentOrder > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::Boltzmann2DCheckerboard< EntityType, double, dimDomain, double, momentOrder > ProblemType;
+
+    static const size_t dimRange = ProblemType::dimRange;
+
     //create Problem
     const auto problem_ptr = ProblemType::create(/*"legendre_pol.csv"*/);
     const auto& problem = *problem_ptr;
 
     //get grid configuration from problem
     auto grid_config = problem.grid_config();
-    grid_config["num_elements"] = grid_size;
+    grid_config["num_elements"] = "[" + grid_size;
+    for (size_t ii = 1; ii < dimDomain; ++ii)
+        grid_config["num_elements"] += " " + grid_size;
+    grid_config["num_elements"] += "]";
+
 
     //get analytical flux, initial and boundary values
     typedef typename ProblemType::FluxType              AnalyticalFluxType;
@@ -229,63 +241,67 @@ int main(int argc, char* argv[])
     //calculate dx and choose t_end and initial dt
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
-    const double dx = dimensions.entity_width.max();
-    const double CFL = 0.5;
+    const double dx = 0.01; //dimensions.entity_width.max();
+    const double CFL = 0.01;
     double dt = CFL*dx; //dx/4.0;
-    const double t_end = 2;
+    const double t_end = 3.2;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     typedef typename Dune::GDT::Operators::AdvectionGodunov
             < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
     typedef typename Dune::GDT::Operators::AdvectionSource< SourceType, FVSpaceType > SourceOperatorType;
+    typedef typename Dune::GDT::TimeStepper::RungeKutta< OperatorType, SourceOperatorType, FVFunctionType, double > TimeStepperType;
 
     //create butcher_array
     // forward euler
-    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0]"));
-    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[1]"));
+    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0]"));
+    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[1]"));
+    Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0]"));
     // generic second order, x = 1 (see https://en.wikipedia.org/wiki/List_of_Runge%E2%80%93Kutta_methods)
-//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0; 1 0]"));
-//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[0.5 0.5]"));
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0 0; 1 0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0.5 0.5]"));
+//    Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0 1]"));
     // classic fourth order RK
-//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0 0 0; 0.5 0 0 0; 0 0.5 0 0; 0 0 1 0]"));
-//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0 0 0 0; 0.5 0 0 0; 0 0.5 0 0; 0 0 1 0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
+//    Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0 0.5 0.5 1]"));
 
-    //search suitable time step length
+//    search suitable time step length
 //    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
 //    while (!(dtpair.first)) {
 //      ConstantFunctionType dx_function(dx);
 //      OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
-//      Dune::GDT::TimeStepper::RungeKutta< OperatorType, FVFunctionType, SourceType > timestepper(advection_operator, u, *source, dx, A, b);
-//      dtpair = timestepper.find_suitable_dt(dt, 2, 500, 1000);
+//      SourceOperatorType source_operator(*source, fv_space);
+//          TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
+//      dtpair = timestepper.find_suitable_dt(dt, 2, 20, 200);
 //      dt = dtpair.second;
 //    }
-    std::cout <<" dt/dx: "<< dt/dx << std::endl;
+//    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    const double saveInterval = t_end/1000.0 > dt ? t_end/1000.0 : dt;
+    const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
 
     //create Operators
     ConstantFunctionType dx_function(dx);
-    OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
+    OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true/*, false, true*/);
     SourceOperatorType source_operator(*source, fv_space);
 
     //create timestepper
     std::cout << "Creating TimeStepper..." << std::endl;
-    typedef typename Dune::GDT::TimeStepper::RungeKutta< OperatorType, SourceOperatorType, FVFunctionType, double > TimeStepperType;
-    TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
+    TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b, c);
 
 //    typedef typename TimeStepperType::SolutionType SolutionType;
 //    std::unique_ptr< SolutionType > solution1, solution2;
 
     // solve five times to average timings
-    for (size_t run = 0; run < 5; ++run) {
+//    for (size_t run = 0; run < 5; ++run) {
     // now do the time steps
     timestepper.reset();
 
 //    boost::timer::cpu_timer timer;
     DSC_PROFILER.startTiming("fv.solve");
-    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
-    timestepper.solve(t_end, dt, saveInterval, solution_as_discrete_function);
+//    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
+    timestepper.solve(t_end, dt, saveInterval, false, true, ProblemType::short_id()/*, solution_as_discrete_function*/);
     DSC_PROFILER.stopTiming("fv.solve");
 //    const auto duration = timer.elapsed();
 //    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
@@ -309,14 +325,13 @@ int main(int argc, char* argv[])
       // visualize solution
 //      timestepper.visualize_solution();
 //    }
-    for (size_t ii = 0; ii < solution_as_discrete_function.size(); ++ii) {
-      auto& pair = solution_as_discrete_function[ii];
-      pair.second.template visualize_factor< 0 >("prefix_factor_" + DSC::toString(run)
-                                                                       + "_" + DSC::toString(ii), true);
-    }
-}
+//    for (size_t ii = 0; ii < solution_as_discrete_function.size(); ++ii) {
+//      auto& pair = solution_as_discrete_function[ii];
+//      pair.second.template visualize_factor< 0 >(ProblemType::short_id() + "_factor_0_" + DSC::toString(ii), true);
+//    }
+//}
       // write solution to *.csv file
-      write_solution_to_csv(grid_view, timestepper.solution(), problem.short_id() + "_P" + DSC::toString(dimRange - 1) + "_n" + DSC::toString(1.0/dx) + "_CFL" + DSC::toString(CFL) + "_CGLegendre_fractional_exact.csv");
+//      write_solution_to_csv(grid_view, timestepper.solution(), problem.short_id() + "_P" + DSC::toString(dimRange - 1) + "_n" + DSC::toString(1.0/dx) + "_CFL" + DSC::toString(CFL) + "_CGLegendre_fractional_exact.csv");
 
 //    // compute L1 error norm
 //    SolutionType difference(*solution1);
