@@ -97,7 +97,8 @@ int main(int argc, char** argv)
     const auto& problem = *problem_ptr;
 
     //get grid configuration from problem
-    const auto grid_config = problem.grid_config();
+    auto grid_config = problem.grid_config();
+    grid_config["num_elements"] = grid_size;
 
     //get analytical flux and initial values
     typedef typename ProblemType::FluxType            AnalyticalFluxType;
@@ -127,7 +128,7 @@ int main(int argc, char** argv)
     const GridViewType grid_view = grid->leafGridView();
     const GridViewType& grid_view_ref = grid_view;
     typedef typename Dune::Stuff::Grid::PeriodicGridView< GridViewType >        PeriodicGridViewType;
-//    typedef Spaces::FV::Default< PeriodicGridViewType, RangeFieldType, 1 >      FVSpaceType;
+//    typedef Spaces::FV::DefaultProduct< GridViewType, RangeFieldType, dimRange >      FVSpaceType;
     typedef Spaces::FV::DefaultProduct< PeriodicGridViewType, RangeFieldType, dimRange > FVSpaceType;
     std::bitset< dimDomain > periodic_directions;
     if (problem.boundary_info()["type"] == "periodic")
@@ -151,38 +152,45 @@ int main(int argc, char** argv)
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< PeriodicGridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    double dt = dx/8.0;
+    double dt = dx*0.5;
     const double t_end = 1;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
     typedef typename Dune::GDT::Operators::AdvectionGodunov
-            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::superbee*/ > OperatorType;
+            < AnalyticalFluxType, ConstantFunctionType, BoundaryValueType, FVSpaceType/*, Dune::GDT::Operators::SlopeLimiters::no_slope*/ > OperatorType;
     typedef typename Dune::GDT::Operators::AdvectionSource< SourceType, FVSpaceType > SourceOperatorType;
     typedef typename Dune::GDT::TimeStepper::RungeKutta< OperatorType, SourceOperatorType, FVFunctionType, double > TimeStepperType;
 
     //create butcher_array
     // forward euler
-    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0]"));
-    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[1]"));
-    // generic second order, x = 1 (see https://en.wikipedia.org/wiki/List_of_Runge%E2%80%93Kutta_methods)
-//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0; 1 0]"));
-//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[0.5 0.5]"));
-    // classic fourth order RK
-//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType >  >("[0 0 0 0; 0.5 0 0 0; 0 0.5 0 0; 0 0 1 0]"));
-//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType >  >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
+        Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0]"));
+        Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[1]"));
+        Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0]"));
+    // Heun's method
+//        Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0 0; 1 0]"));
+//        Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0.5 0.5]"));
+//        Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0 1]"));
+    // optimal third order SSP
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0 0 0; 1 0 0; 0.25 0.25 0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0.166666666666666666666666 0.1666666666666666666666666 0.6666666666666666666666666]"));
+//    Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0 1 0.5]"));
+    // classical fourth order RK4
+//    Dune::DynamicMatrix< RangeFieldType > A(DSC::fromString< Dune::DynamicMatrix< RangeFieldType > >("[0 0 0 0; 0.5 0 0 0; 0 0.5 0 0; 0 0 1 0]"));
+//    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[" + DSC::toString(1.0/6.0, 15) + " " + DSC::toString(1.0/3.0, 15) + " " + DSC::toString(1.0/3.0, 15) + " " + DSC::toString(1.0/6.0, 15) + "]"));
+//    Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0 0.5 0.5 1]"));
 
 
     // search suitable time step length
-    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
-    while (!(dtpair.first)) {
-      ConstantFunctionType dx_function(dx);
-      OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
-      SourceOperatorType source_operator(*source, fv_space);
-          TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
-      dtpair = timestepper.find_suitable_dt(dt, 2, 500, 200);
-      dt = dtpair.second;
-    }
+//    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
+//    while (!(dtpair.first)) {
+//      ConstantFunctionType dx_function(dx);
+//      OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, false);
+//      SourceOperatorType source_operator(*source, fv_space);
+//          TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
+//      dtpair = timestepper.find_suitable_dt(dt, 2, 500, 200);
+//      dt = dtpair.second;
+//    }
     std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
     //create timestepper
@@ -190,13 +198,16 @@ int main(int argc, char** argv)
     ConstantFunctionType dx_function(dx);
     OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
     SourceOperatorType source_operator(*source, fv_space);
-    TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
+    TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b, c);
 
-    const double saveInterval = t_end/1000 > dt ? t_end/1000 : dt;
+    const double saveInterval = t_end/100 > dt ? t_end/100 : dt;
     // now do the time steps
-    timestepper.solve(t_end, dt, saveInterval);
+    DSC_PROFILER.startTiming("fv.solve");
+    timestepper.solve(t_end, dt, saveInterval, true, false);
+    DSC_PROFILER.stopTiming("fv.solve");
+    std::cout << "Solving took: " << DSC_PROFILER.getTiming("fv.solve", true)/1000.0 << " or " << DSC_PROFILER.getTiming("fv.solve", false)/1000.0 << std::endl;
 
-    timestepper.visualize_solution("burgers");
+    timestepper.visualize_solution("transport_heun_godunov");
 
     std::cout << "Finished!!\n";
 

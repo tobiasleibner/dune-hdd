@@ -498,7 +498,7 @@ public:
     ConfigType flux_config = DefaultFluxType::default_config();
     flux_config["type"] = DefaultFluxType::static_id();
     flux_config["A"] = GetData::create_flux_matrix();
-    std::cout << flux_config["A"] << std::endl;
+    //std::cout << flux_config["A"] << std::endl;
     flux_config["b"] = DSC::toString(RangeType(0));
     flux_config["sparse"] = "true";
     config.add(flux_config, "flux");

@@ -53,6 +53,11 @@ public:
     return BaseType::type() + ".shallowwater";
   }
 
+  static std::string short_id()
+  {
+    return "Shallowwater";
+  }
+
 protected:
   static ConfigType default_grid_config()
   {
@@ -77,14 +82,14 @@ public:
     ConfigType config;
     config.add(default_grid_config(), "grid");
     config.add(default_boundary_info_config(), "boundary_info");
-    ConfigType flux_config = DefaultFluxType::default_config();
+    ConfigType flux_config;
     flux_config["type"] = FluxType::static_id();
     flux_config["variable"] = "u";
     flux_config["expression"] = "[u[1] u[1]*u[1]/u[0]+9.81*0.5*u[0]*u[0]]";
     flux_config["order"] = "2";
-    flux_config["gradient"] = "[0 1; -1.0*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0]]";
+    flux_config["gradient.0"] = "[0 1; -1.0*u[1]*u[1]/(u[0]*u[0])+9.81*u[0] 2*u[1]/u[0]]";
     config.add(flux_config, "flux");
-    ConfigType source_config = DefaultSourceType::default_config();
+    ConfigType source_config;
     source_config["lower_left"] = "[0.0]";
     source_config["upper_right"] = "[10.0]";
     source_config["num_elements"] = "[1]";
@@ -92,12 +97,16 @@ public:
     source_config["values.0"] = "[0 0]";
     source_config["name"] = static_id();
     config.add(source_config, "source");
-    ConfigType initial_value_config = DefaultFunctionType::default_config();
+    ConfigType initial_value_config;
     initial_value_config["lower_left"] = "[0.0]";
     initial_value_config["upper_right"] = "[10.0]";
-    initial_value_config["num_elements"] = "[1]";
+    initial_value_config["num_elements"] = "[5]";
     initial_value_config["variable"] = "x";
-    initial_value_config["values.0"] = "[1+cos(pi/2*(x[0]-5))*exp(-(x[0]-5)^4) 0]";         // bump for shallow water equations, domain [0,10], Leveque p.257
+    initial_value_config["values.0"] = "[1 0]";
+    initial_value_config["values.1"] = "[1 0]";
+    initial_value_config["values.2"] = "[1+((x[0]-4)^2)*((x[0]-6)^2)*exp(2-((x[0]-4)^2)-((x[0]-6)^2)) 0]";
+    initial_value_config["values.3"] = "[1 0]";
+    initial_value_config["values.4"] = "[1 0]";
     initial_value_config["order"] = "10";
     config.add(initial_value_config, "initial_values");
     ConfigType boundary_value_config = DefaultBoundaryValueType::default_config();

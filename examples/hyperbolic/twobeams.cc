@@ -42,6 +42,7 @@
 #include <dune/hdd/hyperbolic/problems/transport.hh>
 #include <dune/hdd/hyperbolic/problems/2dboltzmann.hh>
 #include <dune/hdd/hyperbolic/problems/2dboltzmanncheckerboard.hh>
+#include <dune/hdd/hyperbolic/problems/shallowwater.hh>
 
 using namespace Dune::GDT;
 using namespace Dune::HDD;
@@ -170,24 +171,25 @@ int main(int argc, char* argv[])
     // setup threadmanager
     DSC_CONFIG.set("threading.partition_factor", 1, true);
     // set dimensions
-    static const size_t dimDomain = 2;
+    static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
     // for Boltzmann2D, this is not dimRange but the maximal moment order
-    static const size_t momentOrder = 15;
+    static const size_t momentOrder = 50;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
 
     //configure Problem
 //    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
-//    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
+    typedef Dune::HDD::Hyperbolic::Problems::TwoBeams< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::TwoPulses< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::RectangularIC< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::SourceBeam< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::OneBeam< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
 //    typedef Dune::HDD::Hyperbolic::Problems::Boltzmann2DLineSource< EntityType, double, dimDomain, double, momentOrder > ProblemType;
-    typedef Dune::HDD::Hyperbolic::Problems::Boltzmann2DCheckerboard< EntityType, double, dimDomain, double, momentOrder > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::Boltzmann2DCheckerboard< EntityType, double, dimDomain, double, momentOrder > ProblemType;
+//    typedef Dune::HDD::Hyperbolic::Problems::ShallowWater< EntityType, double, dimDomain, double, momentOrder > ProblemType;
 
     static const size_t dimRange = ProblemType::dimRange;
 
@@ -241,10 +243,10 @@ int main(int argc, char* argv[])
     //calculate dx and choose t_end and initial dt
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
-    const double dx = 7.0/DSC::fromString< double >(grid_size); //dimensions.entity_width.max();
+    const double dx = dimensions.entity_width.max();
     const double CFL = 0.5;
     double dt = CFL*dx; //dx/4.0;
-    const double t_end = 3.2;
+    const double t_end = 2;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
@@ -279,11 +281,11 @@ int main(int argc, char* argv[])
 //    }
 //    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
+    const double saveInterval = t_end/1000.0 > dt ? t_end/1000.0 : dt;
 
     //create Operators
     ConstantFunctionType dx_function(dx);
-    OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true/*, false, true*/);
+    OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true /*, false, true*/);
     SourceOperatorType source_operator(*source, fv_space);
 
     //create timestepper
@@ -301,7 +303,7 @@ int main(int argc, char* argv[])
 //    boost::timer::cpu_timer timer;
     DSC_PROFILER.startTiming("fv.solve");
 //    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
-    timestepper.solve(t_end, dt, saveInterval, false, true, ProblemType::short_id()/*, solution_as_discrete_function*/);
+    timestepper.solve(t_end, dt, saveInterval, true, false, ProblemType::short_id()/*, solution_as_discrete_function*/);
     DSC_PROFILER.stopTiming("fv.solve");
 //    const auto duration = timer.elapsed();
 //    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
@@ -323,7 +325,7 @@ int main(int argc, char* argv[])
 //      output_file.close();
 
       // visualize solution
-//      timestepper.visualize_solution();
+//      timestepper.visualize_solution("twobeams");
 //    }
 //    for (size_t ii = 0; ii < solution_as_discrete_function.size(); ++ii) {
 //      auto& pair = solution_as_discrete_function[ii];
@@ -343,7 +345,7 @@ int main(int argc, char* argv[])
 
     mem_usage();
     DSC_PROFILER.setOutputdir(output_dir);
-    DSC_PROFILER.outputTimings("profiler");
+    DSC_PROFILER.outputTimings("timings_twobeams");
     std::cout << " done" << std::endl;
     return 0;
   } catch (Dune::Exception& e) {
