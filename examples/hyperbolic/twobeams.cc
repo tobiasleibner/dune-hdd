@@ -245,8 +245,8 @@ int main(int argc, char* argv[])
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     const double CFL = 0.5;
-    double dt = CFL*dx; //dx/4.0;
-    const double t_end = 2;
+    double dt = 0.000005;// CFL*dx; //dx/4.0;
+    const double t_end = 0.02;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
@@ -281,7 +281,7 @@ int main(int argc, char* argv[])
 //    }
 //    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    const double saveInterval = t_end/1000.0 > dt ? t_end/1000.0 : dt;
+    const double saveInterval = t_end/10.0 > dt ? t_end/10.0 : dt;
 
     //create Operators
     ConstantFunctionType dx_function(dx);
@@ -300,29 +300,29 @@ int main(int argc, char* argv[])
     // now do the time steps
     timestepper.reset();
 
-//    boost::timer::cpu_timer timer;
-    DSC_PROFILER.startTiming("fv.solve");
+    boost::timer::cpu_timer timer;
+//    DSC_PROFILER.startTiming("fv.solve");
 //    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
     timestepper.solve(t_end, dt, saveInterval, true, false, ProblemType::short_id()/*, solution_as_discrete_function*/);
-    DSC_PROFILER.stopTiming("fv.solve");
-//    const auto duration = timer.elapsed();
+//    DSC_PROFILER.stopTiming("fv.solve");
+    const auto duration = timer.elapsed();
 //    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
 //    std::cout << "took: " << DSC_PROFILER.getTiming("solve")/1000.0 << "(walltime " << DSC_PROFILER.getTiming("solve", true)/1000.0 << ")" << std::endl;
-    DSC_PROFILER.nextRun();
+//    DSC_PROFILER.nextRun();
 
       // write timings to file
-//      const bool file_already_exists = boost::filesystem::exists("time.csv");
-//      std::ofstream output_file("time.csv", std::ios_base::app);
-//      if (!file_already_exists) { // write header
-//      output_file << "Problem: " + problem.static_id()
-//                  << ", dimRange = " << dimRange
-// //                  << ", number of grid cells: " << grid_config["num_elements"]
-//                  << ", dt = " << DSC::toString(dt)
-//                  << std::endl;
-//      output_file << "num_processes, num_grid_cells, wall, user, system" << std::endl;
-//      }
-//      output_file << argv[1] << ", " << grid_config["num_elements"] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
-//      output_file.close();
+      const bool file_already_exists = boost::filesystem::exists("weak_scaling_versuch_2.csv");
+      std::ofstream output_file("weak_scaling_versuch_2.csv", std::ios_base::app);
+      if (!file_already_exists) { // write header
+      output_file << "Problem: " + problem.static_id()
+                  << ", dimRange = " << dimRange
+ //                  << ", number of grid cells: " << grid_config["num_elements"]
+                  << ", dt = " << DSC::toString(dt)
+                  << std::endl;
+      output_file << "num_processes, num_grid_cells, wall, user, system" << std::endl;
+      }
+      output_file << num_threads << ", " << grid_config["num_elements"] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
+      output_file.close();
 
       // visualize solution
 //      timestepper.visualize_solution("twobeams");
