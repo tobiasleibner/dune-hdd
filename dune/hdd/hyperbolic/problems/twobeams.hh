@@ -58,12 +58,12 @@ namespace Problems {
  * \f]
  * This is a linear hyperbolic conservation law with source term q - (\sigma_a*I_{n\times n} + 0.5*T*S M^{-1}) u.
  * */
-template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t rangeDim >
+template< class EntityImp, class DomainFieldImp, size_t domainDim, class RangeFieldImp, size_t momentOrder >
 class TwoBeams
-  : public Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >
+  : public Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, momentOrder + 1 >
 {
-  typedef TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim > ThisType;
-  typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, rangeDim >  BaseType;
+  typedef TwoBeams< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, momentOrder > ThisType;
+  typedef Default< EntityImp, DomainFieldImp, domainDim, RangeFieldImp, momentOrder + 1 >  BaseType;
 
 public:
   using BaseType::dimDomain;

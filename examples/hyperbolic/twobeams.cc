@@ -175,7 +175,7 @@ int main(int argc, char* argv[])
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
     // for Boltzmann2D, this is not dimRange but the maximal moment order
-    static const size_t momentOrder = 50;
+    static const size_t momentOrder = 5;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
     typedef typename GridType::Codim< 0 >::Entity                           EntityType;
@@ -245,8 +245,8 @@ int main(int argc, char* argv[])
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     const double CFL = 0.5;
-    double dt = 0.000005;// CFL*dx; //dx/4.0;
-    const double t_end = 0.02;
+    double dt = CFL*dx; //dx/4.0;
+    const double t_end = 0.004;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
@@ -300,32 +300,32 @@ int main(int argc, char* argv[])
     // now do the time steps
     timestepper.reset();
 
-    boost::timer::cpu_timer timer;
-//    DSC_PROFILER.startTiming("fv.solve");
+//    boost::timer::cpu_timer timer;
+    DSC_PROFILER.startTiming("fv.solve");
 //    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
     timestepper.solve(t_end, dt, saveInterval, true, false, ProblemType::short_id()/*, solution_as_discrete_function*/);
-//    DSC_PROFILER.stopTiming("fv.solve");
-    const auto duration = timer.elapsed();
+    DSC_PROFILER.stopTiming("fv.solve");
+//    const auto duration = timer.elapsed();
 //    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
-//    std::cout << "took: " << DSC_PROFILER.getTiming("solve")/1000.0 << "(walltime " << DSC_PROFILER.getTiming("solve", true)/1000.0 << ")" << std::endl;
+    std::cout << "took: " << DSC_PROFILER.getTiming("fv.solve")/1000.0 << "(walltime " << DSC_PROFILER.getTiming("fv.solve", true)/1000.0 << ")" << std::endl;
 //    DSC_PROFILER.nextRun();
 
       // write timings to file
-      const bool file_already_exists = boost::filesystem::exists("weak_scaling_versuch_2.csv");
-      std::ofstream output_file("weak_scaling_versuch_2.csv", std::ios_base::app);
-      if (!file_already_exists) { // write header
-      output_file << "Problem: " + problem.static_id()
-                  << ", dimRange = " << dimRange
- //                  << ", number of grid cells: " << grid_config["num_elements"]
-                  << ", dt = " << DSC::toString(dt)
-                  << std::endl;
-      output_file << "num_processes, num_grid_cells, wall, user, system" << std::endl;
-      }
-      output_file << num_threads << ", " << grid_config["num_elements"] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
-      output_file.close();
+//      const bool file_already_exists = boost::filesystem::exists("weak_scaling_versuch_2.csv");
+//      std::ofstream output_file("weak_scaling_versuch_2.csv", std::ios_base::app);
+//      if (!file_already_exists) { // write header
+//      output_file << "Problem: " + problem.static_id()
+//                  << ", dimRange = " << dimRange
+// //                  << ", number of grid cells: " << grid_config["num_elements"]
+//                  << ", dt = " << DSC::toString(dt)
+//                  << std::endl;
+//      output_file << "num_threads, num_grid_cells, wall, user, system" << std::endl;
+//      }
+//      output_file << num_threads << ", " << grid_config["num_elements"] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
+//      output_file.close();
 
       // visualize solution
-//      timestepper.visualize_solution("twobeams");
+      timestepper.visualize_solution("twobeams");
 //    }
 //    for (size_t ii = 0; ii < solution_as_discrete_function.size(); ++ii) {
 //      auto& pair = solution_as_discrete_function[ii];
