@@ -32,7 +32,6 @@
 #include <dune/gdt/operators/projections.hh>
 #include <dune/gdt/spaces/fv/defaultproduct.hh>
 #include <dune/gdt/timestepper/rungekutta.hh>
-//#include <dune/gdt/playground/functions/entropymomentfunction.hh>
 
 #include <dune/hdd/hyperbolic/problems/twobeams.hh>
 #include <dune/hdd/hyperbolic/problems/twopulses.hh>
@@ -47,91 +46,12 @@
 using namespace Dune::GDT;
 using namespace Dune::HDD;
 
-template< class GridViewType, class SolutionType >
-void write_solution_to_csv(const GridViewType& grid_view, SolutionType solution, const std::string filename)
-{
-  std::cout << "Writing solution to .csv file..." << std::endl;
-  //remove file if already existing
-  std::string timefilename = filename + "_timesteps";
-  remove(filename.c_str());
-  remove(timefilename.c_str());
-  // open empty file
-  std::ofstream output_file(filename);
-  std::ofstream time_output_file(timefilename);
-  // write first line
-  const auto it_end_2 = grid_view.template end< 0 >();
-//  if (write_time_to_first_col)
-//    output_file << ", ";
-//  for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
-//    const auto& entity = *it;
-//    output_file << DSC::toString(entity.geometry().center()[0]);
-//  }
-  //  output_file << std::endl;
-  for (auto& pair : solution) {
-    time_output_file << DSC::toString(pair.first) << std::endl;
-    const auto discrete_func = pair.second;
-    const auto const_it_begin = grid_view.template begin< 0 >();
-    for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
-      const auto& entity = *it;
-      if (it != const_it_begin)
-        output_file << ", ";
-      output_file << DSC::toString(discrete_func.local_discrete_function(entity)->evaluate(entity.geometry().local(entity.geometry().center()))[0]);
-    }
-    output_file << std::endl;
-  }
-  output_file.close();
-}
-
-template< class GridViewType, class SolutionType >
-double compute_L1_norm(const GridViewType& grid_view, const SolutionType solution)
-{
-    double norm = 0;
-    for (size_t ii = 0; ii < solution.size(); ++ii) {
-      double spatial_integral = 0;
-      const auto it_end = grid_view.template end< 0 >();
-      for (auto it = grid_view.template begin< 0 >(); it != it_end; ++it) {
-        const auto& entity = *it;
-        double value = std::abs(solution[ii].second.vector()[grid_view.indexSet().index(entity)]);
-        spatial_integral += value*entity.geometry().volume();
-//          std::cout << "value: " << value <<  "entity.geometry.volume: " << entity.geometry().volume() << std::endl;
-      }
-//        const double dt = ii == 0 ? function[ii].first : function[ii].first - function[ii-1].first;
-      const double dt = (ii == solution.size() - 1) ? solution[ii].first - solution[ii-1].first : solution[ii+1].first - solution[ii].first;
-      norm += dt*spatial_integral;
-//        std::cout << "dt = " << dt << ", spatial: " << spatial_integral << std::endl;
-    }
-//      std::cout << "norm: " << norm << std::endl;
-    return norm;
-}
-
-void mem_usage() {
-  auto comm = Dune::MPIHelper::getCollectiveCommunication();
-  // Compute the peak memory consumption of each processes
-  int who = RUSAGE_SELF;
-  struct rusage usage;
-  getrusage(who, &usage);
-  long peakMemConsumption = usage.ru_maxrss;
-  // compute the maximum and mean peak memory consumption over all processes
-  long maxPeakMemConsumption = comm.max(peakMemConsumption);
-  long totalPeakMemConsumption = comm.sum(peakMemConsumption);
-  long meanPeakMemConsumption = totalPeakMemConsumption / comm.size();
-  // write output on rank zero
-  if (comm.rank() == 0) {
-    std::unique_ptr<boost::filesystem::ofstream> memoryConsFile(
-        DSC::make_ofstream(std::string(DSC_CONFIG_GET("global.datadir", "data/")) + std::string("/memory.csv")));
-    *memoryConsFile << "global.maxPeakMemoryConsumption,global.meanPeakMemoryConsumption\n" << maxPeakMemConsumption
-                    << "," << meanPeakMemConsumption << std::endl;
-  }
-}
-
-
 int main(int argc, char* argv[])
 {
   try {
     // setup MPI
     typedef Dune::MPIHelper MPIHelper;
     MPIHelper::instance(argc, argv);
-    //  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
 
     // parse options
     if (argc < 5) {
@@ -174,7 +94,6 @@ int main(int argc, char* argv[])
     static const size_t dimDomain = 1;
     // for dimRange > 250, an "exceeded maximum recursive template instantiation limit" error occurs (tested with
     // clang 3.5). You need to pass -ftemplate-depth=N with N > dimRange + 10 to clang for higher dimRange.
-    // for Boltzmann2D, this is not dimRange but the maximal moment order
     static const size_t momentOrder = 5;
     //choose GridType
     typedef Dune::YaspGrid< dimDomain >                                     GridType;
@@ -245,8 +164,8 @@ int main(int argc, char* argv[])
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
     const double CFL = 0.5;
-    double dt = CFL*dx; //dx/4.0;
-    const double t_end = 0.004;
+    double dt = CFL*dx;
+    const double t_end = 0.5;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
@@ -269,19 +188,9 @@ int main(int argc, char* argv[])
 //    Dune::DynamicVector< RangeFieldType > b(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[" + DSC::toString(1.0/6.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(1.0/6.0) + "]"));
 //    Dune::DynamicVector< RangeFieldType > c(DSC::fromString< Dune::DynamicVector< RangeFieldType > >("[0 0.5 0.5 1]"));
 
-//    search suitable time step length
-//    std::pair< bool, double > dtpair = std::make_pair(bool(false), dt);
-//    while (!(dtpair.first)) {
-//      ConstantFunctionType dx_function(dx);
-//      OperatorType advection_operator(*analytical_flux, dx_function, dt, *boundary_values, fv_space, true);
-//      SourceOperatorType source_operator(*source, fv_space);
-//          TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b);
-//      dtpair = timestepper.find_suitable_dt(dt, 2, 20, 200);
-//      dt = dtpair.second;
-//    }
-//    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    const double saveInterval = t_end/10.0 > dt ? t_end/10.0 : dt;
+    // save 100 time steps
+    const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
 
     //create Operators
     ConstantFunctionType dx_function(dx);
@@ -292,58 +201,13 @@ int main(int argc, char* argv[])
     std::cout << "Creating TimeStepper..." << std::endl;
     TimeStepperType timestepper(advection_operator, source_operator, u, dx, A, b, c);
 
-//    typedef typename TimeStepperType::SolutionType SolutionType;
-//    std::unique_ptr< SolutionType > solution1, solution2;
-
-    // solve five times to average timings
-//    for (size_t run = 0; run < 5; ++run) {
-    // now do the time steps
-    timestepper.reset();
-
-//    boost::timer::cpu_timer timer;
+    // solve
+    std::cout << "Solving...";
     DSC_PROFILER.startTiming("fv.solve");
-//    std::vector< std::pair< double, FVFunctionType > > solution_as_discrete_function;
-    timestepper.solve(t_end, dt, saveInterval, true, false, ProblemType::short_id()/*, solution_as_discrete_function*/);
+    timestepper.solve(t_end, dt, saveInterval, false, true, ProblemType::static_id());
     DSC_PROFILER.stopTiming("fv.solve");
-//    const auto duration = timer.elapsed();
-//    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
-    std::cout << "took: " << DSC_PROFILER.getTiming("fv.solve")/1000.0 << "(walltime " << DSC_PROFILER.getTiming("fv.solve", true)/1000.0 << ")" << std::endl;
-//    DSC_PROFILER.nextRun();
+    std::cout << "done.\n took: " << DSC_PROFILER.getTiming("fv.solve", true)/1000.0 << "seconds" << std::endl;
 
-      // write timings to file
-//      const bool file_already_exists = boost::filesystem::exists("weak_scaling_versuch_2.csv");
-//      std::ofstream output_file("weak_scaling_versuch_2.csv", std::ios_base::app);
-//      if (!file_already_exists) { // write header
-//      output_file << "Problem: " + problem.static_id()
-//                  << ", dimRange = " << dimRange
-// //                  << ", number of grid cells: " << grid_config["num_elements"]
-//                  << ", dt = " << DSC::toString(dt)
-//                  << std::endl;
-//      output_file << "num_threads, num_grid_cells, wall, user, system" << std::endl;
-//      }
-//      output_file << num_threads << ", " << grid_config["num_elements"] << ", " << duration.wall*1e-9 << ", " << duration.user*1e-9 << ", " << duration.system*1e-9 << std::endl;
-//      output_file.close();
-
-      // visualize solution
-      timestepper.visualize_solution("twobeams");
-//    }
-//    for (size_t ii = 0; ii < solution_as_discrete_function.size(); ++ii) {
-//      auto& pair = solution_as_discrete_function[ii];
-//      pair.second.template visualize_factor< 0 >(ProblemType::short_id() + "_factor_0_" + DSC::toString(ii), true);
-//    }
-//}
-      // write solution to *.csv file
-//      write_solution_to_csv(grid_view, timestepper.solution(), problem.short_id() + "_P" + DSC::toString(dimRange - 1) + "_n" + DSC::toString(1.0/dx) + "_CFL" + DSC::toString(CFL) + "_CGLegendre_fractional_exact.csv");
-
-//    // compute L1 error norm
-//    SolutionType difference(*solution1);
-//    for (size_t ii = 0; ii < difference.size(); ++ii) {
-//      assert(DSC::FloatCmp::eq(difference[ii].first, solution2->operator[](ii).first) && "Time steps must be the same");
-//      difference[ii].second.vector() = difference[ii].second.vector() - solution2->operator[](ii).second.vector();
-//    }
-//    std::cout << "error: " << DSC::toString(compute_L1_norm(grid_view, difference)) << std::endl;
-
-    mem_usage();
     DSC_PROFILER.setOutputdir(output_dir);
     DSC_PROFILER.outputTimings("timings_twobeams");
     std::cout << " done" << std::endl;
