@@ -30,4 +30,4 @@ example_hyperbolic_twobeams
   add_dune_mpi_flags(${target})
   target_link_libraries(${target} parmetis )
   add_dune_alugrid_flags(${target})
-endforeach(_target)
+endforeach(target)
