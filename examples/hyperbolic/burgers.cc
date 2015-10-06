@@ -17,7 +17,6 @@
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/grid/periodicview.hh>
 #include <dune/stuff/la/container/common.hh>
-#include <dune/stuff/playground/functions/indicator.hh>
 
 #include <dune/gdt/assembler/local/codim1.hh>
 #include <dune/gdt/assembler/system.hh>
@@ -82,7 +81,7 @@ int main(int argc, char** argv)
     static const size_t dimDomain = 1;
     static const size_t dimRange = 1;
     //choose GridType
-    typedef Dune::YaspGrid< dimDomain >                                     GridType;
+    typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  GridType;
 //    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::simplex, Dune::conforming >      GridType;
 //    typedef Dune::ALUGrid< dimDomain, dimDomain, Dune::cube, Dune::nonconforming >      GridType;
     typedef typename GridType::Codim< 0 >::Entity           EntityType;
@@ -205,7 +204,7 @@ int main(int argc, char** argv)
     DSC_PROFILER.startTiming("fv.solve");
     timestepper.solve(t_end, dt, saveInterval, true, false);
     DSC_PROFILER.stopTiming("fv.solve");
-    std::cout << "Solving took: " << DSC_PROFILER.getTiming("fv.solve", true)/1000.0 << " or " << DSC_PROFILER.getTiming("fv.solve", false)/1000.0 << std::endl;
+    std::cout << "Solving took: " << DSC_PROFILER.getTiming("fv.solve")/1000.0 << std::endl;
 
     timestepper.visualize_solution("transport_heun_godunov");
 

@@ -114,7 +114,7 @@ protected:
   {
   public:
     typedef DomainFieldImp                                                            VelocityFieldImp;
-    typedef typename Dune::SGrid< dimDomain, dimDomain, VelocityFieldImp >            VelocityGridType;
+    typedef typename Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > > VelocityGridType;
     typedef Dune::Stuff::Grid::Providers::Cube< VelocityGridType >                    VelocityGridProviderType;
     typedef typename VelocityGridType::LeafGridView                                   VelocityGridViewType;
     typedef typename VelocityGridType::template Codim< 0 >::Entity                    VelocityEntityType;

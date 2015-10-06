@@ -177,8 +177,8 @@ int main(int argc, char* argv[])
     // for Boltzmann2D, this is not dimRange but the maximal moment order
     static const size_t momentOrder = 5;
     //choose GridType
-    typedef Dune::YaspGrid< dimDomain >                                     GridType;
-    typedef typename GridType::Codim< 0 >::Entity                           EntityType;
+    typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  GridType;
+    typedef typename GridType::Codim< 0 >::Entity                                         EntityType;
 
     //configure Problem
 //    typedef Dune::HDD::Hyperbolic::Problems::Transport< EntityType, double, dimDomain, double, momentOrder + 1 > ProblemType;
@@ -244,9 +244,9 @@ int main(int argc, char* argv[])
     std::cout << "Calculating dx..." << std::endl;
     Dune::Stuff::Grid::Dimensions< GridViewType > dimensions(fv_space.grid_view());
     const double dx = dimensions.entity_width.max();
-    const double CFL = 0.5;
+    const double CFL = 0.1;
     double dt = CFL*dx; //dx/4.0;
-    const double t_end = 0.004;
+    const double t_end = 1.0;
 
     //define operator types
     typedef typename Dune::Stuff::Functions::Constant< EntityType, DomainFieldType, dimDomain, RangeFieldType, dimRange, 1 > ConstantFunctionType;
@@ -281,7 +281,7 @@ int main(int argc, char* argv[])
 //    }
 //    std::cout <<" dt/dx: "<< dt/dx << std::endl;
 
-    const double saveInterval = t_end/10.0 > dt ? t_end/10.0 : dt;
+    const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
 
     //create Operators
     ConstantFunctionType dx_function(dx);
@@ -307,7 +307,7 @@ int main(int argc, char* argv[])
     DSC_PROFILER.stopTiming("fv.solve");
 //    const auto duration = timer.elapsed();
 //    std::cout << "took: " << duration.wall*1e-9 << " seconds(" << duration.user*1e-9 << ", " << duration.system*1e-9 << ")" << std::endl;
-    std::cout << "took: " << DSC_PROFILER.getTiming("fv.solve")/1000.0 << "(walltime " << DSC_PROFILER.getTiming("fv.solve", true)/1000.0 << ")" << std::endl;
+    std::cout << "took: " << DSC_PROFILER.getTiming("fv.solve")/1000.0 << std::endl;
 //    DSC_PROFILER.nextRun();
 
       // write timings to file
