@@ -14,6 +14,23 @@
 #include <iostream>
 #include <fstream>
 
+#include <dune/common/version.hh>
+
+#if DUNE_VERSION_NEWER(DUNE_COMMON,3,9) //EXADUNE
+# include <dune/grid/utility/partitioning/ranged.hh>
+# include <dune/stuff/common/parallel/threadmanager.hh>
+#endif
+
+#if HAVE_TBB
+# include <tbb/blocked_range.h>
+# include <tbb/parallel_reduce.h>
+# include <tbb/tbb_stddef.h>
+#endif
+
+#include <dune/stuff/aliases.hh>
+#include <dune/stuff/common/memory.hh>
+#include <dune/stuff/common/ranges.hh>
+
 #include <boost/timer/timer.hpp>
 #include <boost/filesystem.hpp>
 
@@ -25,6 +42,7 @@
 #include <dune/stuff/grid/provider/cube.hh>
 #include <dune/stuff/grid/information.hh>
 #include <dune/stuff/la/container/common.hh>
+#include <dune/stuff/la/container/pattern.hh>
 #include <dune/stuff/playground/functions/composition.hh>
 
 #include <dune/gdt/discretefunction/default.hh>
@@ -174,7 +192,7 @@ double Q(const double /*t*/, const double x, const double /*mu*/) {
 
 double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
   if (mu > 0)
-    return on_top_boundary ? 0.5/dmu : 0.0;
+    return on_top_boundary ? 1/dmu : 0.0;
   else
     return psi;
 }
@@ -186,25 +204,24 @@ double boundary_conditions_right(const double psi, const double mu, const bool o
     return psi;
 }
 
-template <class DiscreteFunctionType>
-void apply_finite_difference(const DiscreteFunctionType& u_n,
-                             DiscreteFunctionType& u_update,
-                             const double t,
-                             const double dx,
-                             const double dmu)
+template< class EntityRange, class DiscreteFunctionType >
+void walk_grid_parallel(const EntityRange& entity_range,
+                        const DiscreteFunctionType& u_n,
+                        DiscreteFunctionType& u_update,
+                        const double t,
+                        const double dx,
+                        const double dmu)
 {
-  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
   const auto& mapper = u_n.space().mapper();
   const auto& grid_view = u_n.space().grid_view();
   const auto& u_n_vector = u_n.vector();
+  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
   IndexType left_index, right_index, top_index, bottom_index, entity_index;
-  const auto it_end = grid_view.template end< 0 >();
-  for (auto it = grid_view.template begin< 0 >(); it != it_end; ++it) {
+  for (const auto& entity : entity_range) {
     bool on_left_boundary(false);
     bool on_right_boundary(false);
     bool on_top_boundary(false);
     bool on_bottom_boundary(false);
-    const auto entity = *it;
     const auto entity_coords = entity.geometry().center();
     entity_index = mapper.mapToGlobal(entity, 0);
     const auto x = entity_coords[0];
@@ -249,9 +266,82 @@ void apply_finite_difference(const DiscreteFunctionType& u_n,
     const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
     const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
     u_update.vector()[entity_index] = -1.0*mu*(psi_iplus1_k-psi_iminus1_k)/(2.0*dx) - sigma_a(t,x)*psi_i_k
-                                                       + Q(t,x,mu) + 0.5*T(t,x)*((1-mu*mu)*(psi_i_kplus1 - 2*psi_i_k + psi_i_kminus1)/(dmu*dmu)
+                                                       + Q(t,x,mu) + 0.5*T(t,x)*((1-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
                                                                                              - mu*(psi_i_kplus1-psi_i_kminus1)/dmu);
   }
+}
+
+
+#if HAVE_TBB
+  template< class PartitioningType, class DiscreteFunctionType >
+  struct Body
+  {
+    Body(PartitioningType& partitioning,
+         const DiscreteFunctionType& u_n,
+         DiscreteFunctionType& u_update,
+         const double t,
+         const double dx,
+         const double dmu)
+      : partitioning_(partitioning)
+      , u_n_(u_n)
+      , u_update_(u_update)
+      , t_(t)
+      , dx_(dx)
+      , dmu_(dmu)
+    {}
+
+    Body(Body& other, tbb::split /*split*/)
+      : partitioning_(other.partitioning_)
+      , u_n_(other.u_n_)
+      , u_update_(other.u_update_)
+      , t_(other.t_)
+      , dx_(other.dx_)
+      , dmu_(other.dmu_)
+    {}
+
+    void operator()(const tbb::blocked_range< std::size_t > &range) const
+    {
+      // for all partitions in tbb-range
+      for(std::size_t p = range.begin(); p != range.end(); ++p) {
+        auto partition = partitioning_.partition(p);
+        walk_grid_parallel(partition, u_n_, u_update_, t_, dx_, dmu_);
+      }
+    }
+
+    void join(Body& /*other*/)
+    {}
+
+  PartitioningType& partitioning_;
+  const DiscreteFunctionType& u_n_;
+  DiscreteFunctionType& u_update_;
+  const double t_;
+  const double dx_;
+  const double dmu_;
+  }; // struct Body
+#endif //HAVE_TBB
+
+
+template <class DiscreteFunctionType>
+void apply_finite_difference(const DiscreteFunctionType& u_n,
+                             DiscreteFunctionType& u_update,
+                             const double t,
+                             const double dx,
+                             const double dmu)
+{
+  typedef typename DiscreteFunctionType::SpaceType::GridViewType GridViewType;
+#if DUNE_VERSION_NEWER(DUNE_COMMON,3,9) && HAVE_TBB //EXADUNE
+    const auto num_partitions = DSC_CONFIG_GET("threading.partition_factor", 1u)
+                                * DS::threadManager().current_threads();
+    const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(u_n.space().grid_view(), num_partitions);
+    tbb::blocked_range< std::size_t > blocked_range(0, partitioning->partitions());
+    Body< Dune::RangedPartitioning< GridViewType, 0 >, DiscreteFunctionType > body(*partitioning,
+                                                                                   u_n,
+                                                                                   u_update,
+                                                                                   t,
+                                                                                   dx,
+                                                                                   dmu);
+    tbb::parallel_reduce(blocked_range, body);
+#endif
 }
 
 
@@ -265,8 +355,10 @@ double step(double& t,
           Dune::DynamicVector< double >& b_2,
           Dune::DynamicVector< double >& c)
 {
+    static DiscreteFunctionType last_stage_of_last_step = u_n;
+    static bool first_step = true;
     const auto num_stages = A.rows();
-    std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, u_n);
+    std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, last_stage_of_last_step);
     const auto b_diff = b_2 - b_1;
     auto u_n_tmp = u_n;
     double abs_error = 10.0;
@@ -276,20 +368,38 @@ double step(double& t,
     double scale_max = 10;
     double scale_factor = 1.0;
 
+    if (first_step) {
+      apply_finite_difference(u_n_tmp, last_stage_of_last_step, t, dx, dmu);
+      first_step = false;
+      std::cout << "first step" << std::endl;
+    }
+
     double u_n_norm = 0;
     for (auto& value : u_n.vector()) {
       u_n_norm += std::abs(value);
     }
 
+    // fuer zeitunabhaengige funktionen hier hin
+    u_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
+    for (size_t ii = 1; ii < num_stages; ++ii) {
+      u_intermediate_stages[ii].vector() *= 0.0;
+      u_n_tmp.vector() = u_n.vector();
+      for (size_t jj = 0; jj < ii; ++jj)
+        u_n_tmp.vector() += u_intermediate_stages[jj].vector()*(dt*(A[ii][jj]));
+      apply_finite_difference(u_n_tmp, u_intermediate_stages[ii], t+c[ii]*dt, dx, dmu);
+    }
+
     while (rel_error > TOL) {
       dt *= scale_factor;
-      for (size_t ii = 0; ii < num_stages; ++ii) {
-        u_intermediate_stages[ii].vector() *= 0.0;
-        u_n_tmp.vector() = u_n.vector();
-        for (size_t jj = 0; jj < ii; ++jj)
-          u_n_tmp.vector() += u_intermediate_stages[jj].vector()*(dt*(A[ii][jj]));
-        apply_finite_difference(u_n_tmp, u_intermediate_stages[ii], t+c[ii]*dt, dx, dmu);
-      }
+      // fur zeitabhaengige funktionen muss das hier hin
+//      u_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
+//      for (size_t ii = 1; ii < num_stages; ++ii) {
+//        u_intermediate_stages[ii].vector() *= 0.0;
+//        u_n_tmp.vector() = u_n.vector();
+//        for (size_t jj = 0; jj < ii; ++jj)
+//          u_n_tmp.vector() += u_intermediate_stages[jj].vector()*(dt*(A[ii][jj]));
+//        apply_finite_difference(u_n_tmp, u_intermediate_stages[ii], t+c[ii]*dt, dx, dmu);
+//      }
 
       auto error = u_intermediate_stages[0].vector()*b_diff[0];
       for (size_t ii = 1; ii < num_stages; ++ii) {
@@ -308,6 +418,8 @@ double step(double& t,
     for (size_t ii = 0; ii < num_stages; ++ii) {
       u_n.vector() += u_intermediate_stages[ii].vector()*(dt*b_1[ii]);
     }
+
+    last_stage_of_last_step.vector() = u_intermediate_stages[num_stages - 1].vector();
 
     t += dt;
 
@@ -330,7 +442,8 @@ void solve(DiscreteFunctionType& u_n,
            Dune::DynamicMatrix< double > A,
            Dune::DynamicVector< double > b_1,
            Dune::DynamicVector< double > b_2,
-           Dune::DynamicVector< double > c)
+           Dune::DynamicVector< double > c,
+           DS::LA::EigenRowMajorSparseMatrix< double >)
 {
   double t_ = 0;
   double dt = first_dt;
@@ -391,8 +504,10 @@ void integrate_over_mu(const FDDiscreteFunction& u, IntegratedDiscretFunctionTyp
     const auto x_it_end = x_grid_view.template end< 0 >();
     for(auto x_it = x_grid_view.template begin< 0 >(); x_it != x_it_end; ++x_it) {
       const auto& x_entity = *x_it;
-      if (DSC::FloatCmp::eq(x, x_entity.geometry().center()[0]))
+      if (DSC::FloatCmp::eq(x, x_entity.geometry().center()[0])) {
         u_integrated.vector()[x_mapper.mapToGlobal(x_entity,0)] += u.vector()[entity_index];
+        break;
+      }
     }
   }
   u_integrated.vector() *= dmu;
@@ -503,7 +618,7 @@ int main(int argc, char* argv[])
     const double dx = 3.0/x_grid_size;
     const double dmu = 2.0/mu_grid_size;
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
-    const double CFL = 0.1;
+    const double CFL = 0.5;
     double dt = CFL*dx;
     const double t_end = 0.1;
     const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
@@ -513,18 +628,18 @@ int main(int argc, char* argv[])
 
 //    // Bogacki-Shampine
 //    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
-//                                            ("[0 0 0 0; 0.5 0 0 0; 0 0.75 0 0; "
-//                                             + DSC::toString(2.0/9.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(4.0/9.0) + " 0]"));
+//                                    ("[0 0 0 0; 0.5 0 0 0; 0 0.75 0 0; "
+//                                     + DSC::toString(2.0/9.0) + " " + DSC::toString(1.0/3.0) + " " + DSC::toString(4.0/9.0) + " 0]"));
 //    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("["
-//                                              + DSC::toString(2.0/9.0, 15) + " "
-//                                              + DSC::toString(1.0/3.0, 15) + " "
-//                                              + DSC::toString(4.0/9.0, 15)
-//                                              + " 0]"));
+//                                                                                       + DSC::toString(2.0/9.0, 15) + " "
+//                                                                                       + DSC::toString(1.0/3.0, 15) + " "
+//                                                                                       + DSC::toString(4.0/9.0, 15)
+//                                                                                       + " 0]"));
 //    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("["
-//                                              + DSC::toString(7.0/24.0, 15) + " "
-//                                              + DSC::toString(1.0/4.0, 15) + " "
-//                                              + DSC::toString(1.0/3.0, 15) + " "
-//                                              + DSC::toString(1.0/8.0, 15) + " 0]"));
+//                                                                                       + DSC::toString(7.0/24.0, 15) + " "
+//                                                                                       + DSC::toString(1.0/4.0, 15) + " "
+//                                                                                       + DSC::toString(1.0/3.0, 15) + " "
+//                                                                                       + DSC::toString(1.0/8.0, 15) + " 0]"));
 //    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0.5 0.75 1 0]"));
 
     // Dormand–Prince
@@ -557,6 +672,18 @@ int main(int argc, char* argv[])
     Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0.2 0.3 0.8 "+ DSC::toString(8.0/9.0, 15) +" 1 1]"));
 
 
+    const auto num_grid_elements = x_grid_size * mu_grid_size;
+    Dune::Stuff::LA::SparsityPatternDefault pattern(num_grid_elements);
+    for (size_t row = 0; row < num_grid_elements; ++row) {
+      pattern.insert(row, row);
+      if (row < num_grid_elements - 1)
+        pattern.insert(row, row+1);
+      if (row > 1)
+        pattern.insert(row, row-1);
+    }
+    DS::LA::EigenRowMajorSparseMatrix< double > jacobian(num_grid_elements, num_grid_elements, pattern);
+
+
     solve(u,
           t_end,
           dt,
@@ -570,7 +697,8 @@ int main(int argc, char* argv[])
           A,
           b_1,
           b_2,
-          c);
+          c,
+          jacobian);
 
     typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  XGridType;
 
