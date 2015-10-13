@@ -125,7 +125,7 @@ void mem_usage() {
 }
 
 double sigma_a(const double /*t*/,const double /*x*/) {
-  return 4;
+  return 4.0;
 }
 
 double T(const double /*t*/, const double /*x*/) {
@@ -136,21 +136,18 @@ double Q(const double /*t*/, const double /*x*/, const double /*mu*/) {
   return 0;
 }
 
-double boundary_conditions_left(const double psi, const double mu) {
+double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary) {
   if (mu > 0)
-    return DSC::FloatCmp::eq(mu,1.0) ? 100.0 : 0.0;
+    return on_top_boundary ? 100.0 : 0.0;
   else
     return psi;
 }
 
-double boundary_conditions_right(const double psi, const double mu) {
+double boundary_conditions_right(const double psi, const double mu, const bool on_bottom_boundary) {
   if (mu < 0) {
-    return DSC::FloatCmp::eq(mu,-1.0) ? 100.0 : 0.0;
-    std::cout << "left " << mu << std::endl;
-  }
-  else {
+    return on_bottom_boundary ? 100.0 : 0.0;
+  } else {
     return psi;
-    std::cout << "Hallo!" << std::endl;
   }
 }
 
@@ -172,10 +169,10 @@ void step(double& t, const double dt, const double dx, const double dmu, Discret
     double mu_left;
     double mu_right;
     for (; it != it_end; ++it) {
-      bool on_left_boundary;
-      bool on_right_boundary;
-      bool on_top_boundary;
-      bool on_bottom_boundary;
+      bool on_left_boundary(false);
+      bool on_right_boundary(false);
+      bool on_top_boundary(false);
+      bool on_bottom_boundary(false);
       const auto entity = *it;
       const auto entity_coords = entity.geometry().center();
       const auto x = entity_coords[0];
@@ -197,21 +194,16 @@ void step(double& t, const double dt, const double dx, const double dmu, Discret
               on_bottom_boundary = true;
           }
         } else if (DSC::FloatCmp::eq(intersection_coords[1],entity_coords[1])) {
-          std::cout << "Hallo!"
           if (intersection_coords[0] > entity_coords[0]) {
             if (intersection.neighbor())
               right = intersection.outside();
-            else {
+            else
               on_right_boundary = true;
-              mu_right = intersection_coords[1];
-            }
           } else {
             if (intersection.neighbor())
               left = intersection.outside();
-            else {
+            else
               on_left_boundary = true;
-              mu_left = intersection_coords[1];
-            }
           }
         } else {
           DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
@@ -223,10 +215,10 @@ void step(double& t, const double dt, const double dx, const double dmu, Discret
       const auto top_index = mapper.mapToGlobal(top, 0);
       const auto bottom_index = mapper.mapToGlobal(bottom, 0);
       const auto psi_i_k = u_n_tmp_vector[entity_index];
-      const auto psi_iplus1_k = !on_right_boundary ? u_n_tmp_vector[right_index] : boundary_conditions_right(psi_i_k, mu_right);
-      const auto psi_iminus1_k = !on_left_boundary ? u_n_tmp_vector[left_index] : boundary_conditions_left(psi_i_k, mu_left);
-      const auto psi_i_kplus1 = !on_top_boundary ? u_n_tmp_vector[top_index] : psi_i_k;
-      const auto psi_i_kminus1 = !on_bottom_boundary ? u_n_tmp_vector[bottom_index] : psi_i_k;
+      const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary) : u_n_tmp_vector[right_index];
+      const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary) : u_n_tmp_vector[left_index];
+      const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_tmp_vector[top_index];
+      const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_tmp_vector[bottom_index];
       u_n_vector[entity_index] += dt*(-1.0*mu*(psi_iplus1_k-psi_iminus1_k)/(2.0*dx) - sigma_a(t,x)*psi_i_k
                                       + Q(t,x,mu) + 0.5*T(t,x)*((1-mu*mu)*(psi_i_kplus1 - 2*psi_i_k + psi_i_kminus1)/(dmu*dmu)
                                                                 - mu*(psi_i_kplus1-psi_i_kminus1)/dmu));
@@ -330,7 +322,8 @@ int main(int argc, char* argv[])
     }
     size_t num_threads;
     std::string output_dir;
-    std::string grid_size = "1000";
+    std::string grid_size_x = "1000";
+    std::string grid_size_mu = "800";
     for (int i = 1; i < argc; ++i) {
       if (std::string(argv[i]) == "-threading.max_count") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
@@ -348,9 +341,16 @@ int main(int argc, char* argv[])
           std::cerr << "-global.datadir option requires one argument." << std::endl;
           return 1;
         }
-      } else if (std::string(argv[i]) == "-gridsize") {
+      } else if (std::string(argv[i]) == "-gridsize_x") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          grid_size = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
+          grid_size_x = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
+        } else {
+          std::cerr << "-gridsize option requires one argument." << std::endl;
+          return 1;
+        }
+      } else if (std::string(argv[i]) == "-gridsize_mu") {
+        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+          grid_size_mu = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
         } else {
           std::cerr << "-gridsize option requires one argument." << std::endl;
           return 1;
@@ -368,15 +368,15 @@ int main(int argc, char* argv[])
     typedef typename GridType::Codim< 0 >::Entity                                         EntityType;
 
     //get grid configuration from problem
-    size_t x_grid_size = DSC::fromString< size_t >(grid_size);
-    size_t mu_grid_size = 2*x_grid_size;
+    size_t x_grid_size = DSC::fromString< size_t >(grid_size_x);
+    size_t mu_grid_size = DSC::fromString< size_t >(grid_size_mu);
     Dune::Stuff::Common::Configuration grid_config;
     grid_config["type"] = "provider.cube";
     grid_config["lower_left"] = "[-0.5 -1.0]";
     grid_config["upper_right"] = "[0.5 1.0]";
-    grid_config["num_elements"] = "[" + grid_size;
+    grid_config["num_elements"] = "[" + grid_size_x;
     for (size_t ii = 1; ii < 2*dimDomain; ++ii)
-        grid_config["num_elements"] += " " + DSC::toString(mu_grid_size);
+        grid_config["num_elements"] += " " + grid_size_mu;
     grid_config["num_elements"] += "]";
 
     //create grid
@@ -409,10 +409,10 @@ int main(int argc, char* argv[])
     const double dx = 1.0/x_grid_size;
     const double dmu = 2.0/mu_grid_size;
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
-    const double CFL = 0.5;
-    double dt = CFL*dx;
-    const double t_end = 1.0;
-    const double saveInterval = t_end/20.0 > dt ? t_end/20.0 : dt;
+    const double CFL = 0.1;
+    double dt = CFL*dx*dx;
+    const double t_end = 0.01;
+    const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
 
     std::vector< std::pair< double, FVFunctionType > > solution;
 
@@ -433,9 +433,7 @@ int main(int argc, char* argv[])
     x_grid_config["type"] = "provider.cube";
     x_grid_config["lower_left"] = "[-0.5]";
     x_grid_config["upper_right"] = "[0.5]";
-    x_grid_config["num_elements"] = "[" + grid_size;
-    for (size_t ii = 1; ii < dimDomain; ++ii)
-        x_grid_config["num_elements"] += " " + grid_size;
+    x_grid_config["num_elements"] = "[" + grid_size_x;
     x_grid_config["num_elements"] += "]";
 
     //create grid
