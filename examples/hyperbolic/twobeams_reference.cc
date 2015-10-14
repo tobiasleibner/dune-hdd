@@ -197,7 +197,7 @@ double boundary_conditions_left(const double psi, const double mu, const bool on
     return psi;
 }
 
-double boundary_conditions_right(const double psi, const double mu, const bool on_bottom_boundary, const double dmu) {
+double boundary_conditions_right(const double psi, const double mu, const bool /*on_bottom_boundary*/, const double /*dmu*/) {
   if (mu < 0)
     return 0.0001;
   else
@@ -272,6 +272,88 @@ void walk_grid_parallel(const EntityRange& entity_range,
 }
 
 
+template< class EntityRange, class DiscreteFunctionType >
+void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
+                                   const DiscreteFunctionType& u_n,
+                                   DiscreteFunctionType& u_update,
+                                   const double t,
+                                   const double dx,
+                                   const double dmu,
+                                   DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
+                                   const size_t step)
+{
+  const auto& mapper = u_n.space().mapper();
+  const auto& grid_view = u_n.space().grid_view();
+  const auto& u_n_vector = u_n.vector();
+  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
+  IndexType left_index, right_index, top_index, bottom_index, entity_index;
+  for (const auto& entity : entity_range) {
+    bool on_left_boundary(false);
+    bool on_right_boundary(false);
+    bool on_top_boundary(false);
+    bool on_bottom_boundary(false);
+    const auto entity_coords = entity.geometry().center();
+    entity_index = mapper.mapToGlobal(entity, 0);
+    const auto x = entity_coords[0];
+    const auto mu = entity_coords[1];
+    // find neighbors
+    const auto i_it_end = grid_view.iend(entity);
+    for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
+      const auto& intersection = *i_it;
+      const auto intersection_coords = intersection.geometry().center();
+      if (DSC::FloatCmp::eq(intersection_coords[0], entity_coords[0])) {
+        if (intersection_coords[1] > entity_coords[1]) {
+          if (intersection.neighbor())
+            top_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_top_boundary = true;
+        } else {
+          if (intersection.neighbor())
+            bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_bottom_boundary = true;
+        }
+      } else if (DSC::FloatCmp::eq(intersection_coords[1], entity_coords[1])) {
+        if (intersection_coords[0] > entity_coords[0]) {
+          if (intersection.neighbor())
+            right_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_right_boundary = true;
+        } else {
+          if (intersection.neighbor())
+            left_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_left_boundary = true;
+        }
+      } else {
+        DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
+      }
+    }
+
+    if (step == 0) {
+      jacobian.set_entry(entity_index, entity_index, -1.0 * sigma_a(t,x) - T(t,x) * (1.0 - mu * mu)/(dmu * dmu));
+      if (!on_right_boundary)
+        jacobian.set_entry(entity_index, right_index, mu/(-2.0 *dx));
+      if (!on_left_boundary)
+        jacobian.set_entry(entity_index, left_index, mu/(2.0 *dx));
+      if (!on_bottom_boundary)
+        jacobian.set_entry(entity_index, bottom_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) + mu/dmu);
+      if (!on_top_boundary)
+        jacobian.set_entry(entity_index, top_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) - mu/dmu);
+    } else {
+      const auto psi_i_k = u_n_vector[entity_index];
+      const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
+      const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
+      const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
+      const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
+      u_update.vector()[entity_index] = -1.0*mu*(psi_iplus1_k-psi_iminus1_k)/(2.0*dx) - sigma_a(t,x)*psi_i_k
+                                                         + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
+                                                                                               - mu*(psi_i_kplus1-psi_i_kminus1)/dmu);
+    }
+  }
+} // walk_grid_parallel_rosenbrock
+
+
 #if HAVE_TBB
   template< class PartitioningType, class DiscreteFunctionType >
   struct Body
@@ -320,6 +402,62 @@ void walk_grid_parallel(const EntityRange& entity_range,
   }; // struct Body
 #endif //HAVE_TBB
 
+#if HAVE_TBB
+  template< class PartitioningType, class DiscreteFunctionType >
+  struct Body_rosenbrock
+  {
+    Body_rosenbrock(PartitioningType& partitioning,
+                    const DiscreteFunctionType& u_n,
+                    DiscreteFunctionType& u_update,
+                    const double t,
+                    const double dx,
+                    const double dmu,
+                    DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
+                    const size_t stage)
+      : partitioning_(partitioning)
+      , u_n_(u_n)
+      , u_update_(u_update)
+      , t_(t)
+      , dx_(dx)
+      , dmu_(dmu)
+      , jacobian_(jacobian)
+      , stage_(stage)
+    {}
+
+    Body_rosenbrock(Body_rosenbrock& other, tbb::split /*split*/)
+      : partitioning_(other.partitioning_)
+      , u_n_(other.u_n_)
+      , u_update_(other.u_update_)
+      , t_(other.t_)
+      , dx_(other.dx_)
+      , dmu_(other.dmu_)
+      , jacobian_(other.jacobian_)
+      , stage_(other.stage_)
+    {}
+
+    void operator()(const tbb::blocked_range< std::size_t > &range) const
+    {
+      // for all partitions in tbb-range
+      for(std::size_t p = range.begin(); p != range.end(); ++p) {
+        auto partition = partitioning_.partition(p);
+        walk_grid_parallel_rosenbrock(partition, u_n_, u_update_, t_, dx_, dmu_, jacobian_, stage_);
+      }
+    }
+
+    void join(Body_rosenbrock& /*other*/)
+    {}
+
+  PartitioningType& partitioning_;
+  const DiscreteFunctionType& u_n_;
+  DiscreteFunctionType& u_update_;
+  const double t_;
+  const double dx_;
+  const double dmu_;
+  DS::LA::EigenRowMajorSparseMatrix< double >& jacobian_;
+  const size_t stage_;
+  }; // struct Body_rosenbrock
+#endif //HAVE_TBB
+
 
 template <class DiscreteFunctionType>
 void apply_finite_difference(const DiscreteFunctionType& u_n,
@@ -340,6 +478,33 @@ void apply_finite_difference(const DiscreteFunctionType& u_n,
                                                                                    t,
                                                                                    dx,
                                                                                    dmu);
+    tbb::parallel_reduce(blocked_range, body);
+#endif
+}
+
+template <class DiscreteFunctionType>
+void apply_finite_difference_rosenbrock(const DiscreteFunctionType& u_n,
+                                        DiscreteFunctionType& u_update,
+                                        const double t,
+                                        const double dx,
+                                        const double dmu,
+                                        DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
+                                        const size_t stage)
+{
+  typedef typename DiscreteFunctionType::SpaceType::GridViewType GridViewType;
+#if DUNE_VERSION_NEWER(DUNE_COMMON,3,9) && HAVE_TBB //EXADUNE
+    const auto num_partitions = DSC_CONFIG_GET("threading.partition_factor", 1u)
+                                * DS::threadManager().current_threads();
+    const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(u_n.space().grid_view(), num_partitions);
+    tbb::blocked_range< std::size_t > blocked_range(0, partitioning->partitions());
+    Body_rosenbrock< Dune::RangedPartitioning< GridViewType, 0 >, DiscreteFunctionType > body(*partitioning,
+                                                                                              u_n,
+                                                                                              u_update,
+                                                                                              t,
+                                                                                              dx,
+                                                                                              dmu,
+                                                                                              jacobian,
+                                                                                              stage);
     tbb::parallel_reduce(blocked_range, body);
 #endif
 }
@@ -428,6 +593,117 @@ double step(double& t,
     return dt*scale_factor;
 }
 
+template< class DiscreteFunctionType >
+double step_rosenbrock(double& t,
+                       const double initial_dt,
+                       const double dx, const double dmu,
+                       DiscreteFunctionType& u_n,
+                       Dune::DynamicMatrix< double >& A_new,
+                       Dune::DynamicVector< double >& m_1,
+                       Dune::DynamicVector< double >& m_2,
+                       Dune::DynamicVector< double >& c,
+                       Dune::DynamicVector< double >& d,
+                       Dune::DynamicMatrix< double >& C,
+                       const double gamma,
+                       DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
+                       DS::LA::EigenRowMajorSparseMatrix< double >& system_matrix)
+{
+  typedef typename DS::LA::Solver< typename DS::LA::EigenRowMajorSparseMatrix< double > > SolverType;
+  std::unique_ptr< SolverType > solver = DSC::make_unique< SolverType >(system_matrix);
+
+  static DiscreteFunctionType last_stage_of_last_step = u_n;
+  static bool first_step = true;
+  const auto num_stages = A_new.rows();
+  std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, last_stage_of_last_step);
+  const auto m_diff = m_2 - m_1;
+  auto u_n_tmp = u_n;
+  auto k_i_tmp = last_stage_of_last_step;
+  auto k_sum = u_n;
+  double abs_error = 10.0;
+  double rel_error = 10.0;
+  double TOL = 0.0001;
+  double dt = initial_dt;
+  double scale_max = 10;
+  double scale_factor = 1.0;
+
+  if (first_step) {
+    std::fill(k_i_tmp.vector().begin(), k_i_tmp.vector().end(), 0.0);
+    apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t, dx, dmu, jacobian, 0);
+    apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t, dx, dmu, jacobian, 1);
+    system_matrix = jacobian;
+    system_matrix.scal(-1.0);
+    for (size_t row = 0; row < system_matrix.rows(); ++row)
+      system_matrix.add_to_entry(row, row, 1.0/(gamma*dt));
+    solver = DSC::make_unique< SolverType >(system_matrix);
+    solver->apply(k_i_tmp.vector(), last_stage_of_last_step.vector());
+    first_step = false;
+    std::cout << "first step" << std::endl;
+  }
+
+  double u_n_norm = 0;
+  for (auto& value : u_n.vector()) {
+    u_n_norm += std::abs(value);
+  }
+
+  while (rel_error > TOL) {
+    dt *= scale_factor;
+
+    for (size_t ii = 0; ii < num_stages; ++ii) {
+      std::fill(k_i_tmp.vector().begin(), k_i_tmp.vector().end(), 0.0);
+      std::fill(k_sum.vector().begin(), k_sum.vector().end(), 0.0);
+      u_n_tmp.vector() = u_n.vector();
+      for (size_t jj = 0; jj < ii; ++jj) {
+        u_n_tmp.vector().axpy(A_new[ii][jj], u_intermediate_stages[jj].vector());
+        k_sum.vector().axpy(C[ii][jj]/dt, u_intermediate_stages[jj].vector());
+      }
+      apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t+c[ii]*dt, dx, dmu, jacobian, ii);
+      // as C_ii is the same for all i, we only need to calculate the matrix in the first step
+      if (ii == 0) {
+        u_intermediate_stages[ii].vector() = last_stage_of_last_step.vector();
+        // create solver
+        system_matrix = jacobian;
+        system_matrix.scal(-1.0);
+        for (size_t row = 0; row < system_matrix.rows(); ++row)
+          system_matrix.add_to_entry(row, row, 1.0/(gamma*dt));
+        solver = DSC::make_unique< SolverType >(system_matrix);
+      } else {
+      // fuer explizit zeitabhaengige Funktionen fehlt hier ein Term (siehe Wikipedia)
+      // ...
+      //
+      k_i_tmp.vector() += k_sum.vector();
+      // create solver
+      solver->apply(k_i_tmp.vector(), u_intermediate_stages[ii].vector());
+      }
+    }
+
+    auto error = u_intermediate_stages[0].vector()*m_diff[0];
+    for (size_t ii = 1; ii < num_stages; ++ii) {
+      error += u_intermediate_stages[ii].vector()*m_diff[ii];
+    }
+    abs_error = 0.0;
+    for (auto& value : error) {
+      abs_error += std::abs(value);
+    }
+    abs_error *= dt;
+    rel_error = abs_error/u_n_norm;
+    std::cout << rel_error << std::endl;
+    scale_factor = std::min(std::pow(0.9*TOL/rel_error, 1.0/3.0), scale_max);
+  }
+
+  for (size_t ii = 0; ii < num_stages; ++ii) {
+    u_n.vector().axpy(dt*m_1[ii], u_intermediate_stages[ii].vector());
+  }
+
+  t += dt;
+
+  last_stage_of_last_step.vector() = std::move(u_intermediate_stages[num_stages - 1].vector());
+
+  std::cout << t << " and dt " << dt << std::endl;
+
+  return dt*scale_factor;
+}
+
+
 template <class DiscreteFunctionType>
 void solve(DiscreteFunctionType& u_n,
            const double t_end,
@@ -442,8 +718,7 @@ void solve(DiscreteFunctionType& u_n,
            Dune::DynamicMatrix< double > A,
            Dune::DynamicVector< double > b_1,
            Dune::DynamicVector< double > b_2,
-           Dune::DynamicVector< double > c,
-           DS::LA::EigenRowMajorSparseMatrix< double >)
+           Dune::DynamicVector< double > c)
 {
   double t_ = 0;
   double dt = first_dt;
@@ -487,6 +762,156 @@ void solve(DiscreteFunctionType& u_n,
     solution.emplace_back(std::make_pair(t_, u_n));
   }
 } // ... solve(...)
+
+template< class DiscreteFunctionType >
+Dune::Stuff::LA::SparsityPatternDefault assemble_pattern(DiscreteFunctionType& u_n)
+{
+  const auto& mapper = u_n.space().mapper();
+  const auto& grid_view = u_n.space().grid_view();
+  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
+  IndexType left_index, right_index, top_index, bottom_index, entity_index;
+  const auto num_grid_elements = grid_view.size(0);
+  Dune::Stuff::LA::SparsityPatternDefault pattern(num_grid_elements);
+
+  for (const auto& entity : DSC::entityRange(grid_view)) {
+    bool on_left_boundary(false);
+    bool on_right_boundary(false);
+    bool on_top_boundary(false);
+    bool on_bottom_boundary(false);
+    const auto entity_coords = entity.geometry().center();
+    entity_index = mapper.mapToGlobal(entity, 0);
+    // find neighbors
+    const auto i_it_end = grid_view.iend(entity);
+    for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
+      const auto& intersection = *i_it;
+      const auto intersection_coords = intersection.geometry().center();
+      if (DSC::FloatCmp::eq(intersection_coords[0], entity_coords[0])) {
+        if (intersection_coords[1] > entity_coords[1]) {
+          if (intersection.neighbor())
+            top_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_top_boundary = true;
+        } else {
+          if (intersection.neighbor())
+            bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_bottom_boundary = true;
+        }
+      } else if (DSC::FloatCmp::eq(intersection_coords[1], entity_coords[1])) {
+        if (intersection_coords[0] > entity_coords[0]) {
+          if (intersection.neighbor())
+            right_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_right_boundary = true;
+        } else {
+          if (intersection.neighbor())
+            left_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            on_left_boundary = true;
+        }
+      } else {
+        DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
+      }
+    }
+
+    pattern.insert(entity_index, entity_index);
+    if (!on_right_boundary)
+      pattern.insert(entity_index, right_index);
+    if (!on_left_boundary)
+      pattern.insert(entity_index, left_index);
+    if (!on_bottom_boundary)
+      pattern.insert(entity_index, bottom_index);
+    if (!on_top_boundary)
+      pattern.insert(entity_index, top_index);
+  } // grid_walk
+  pattern.sort();
+  return pattern;
+}
+
+
+
+template <class DiscreteFunctionType>
+void solve_rosenbrock(DiscreteFunctionType& u_n,
+                      const double t_end,
+                      const double first_dt,
+                      const double dx,
+                      const double dmu,
+                      const double save_step_length,
+                      const bool save_solution,
+                      const bool write_solution,
+                      const std::string filename_prefix,
+                      std::vector< std::pair< double, DiscreteFunctionType > >& solution,
+                      Dune::DynamicMatrix< double > A,
+                      Dune::DynamicVector< double > b_1,
+                      Dune::DynamicVector< double > b_2,
+                      Dune::DynamicVector< double > c,
+                      Dune::DynamicVector< double > d,
+                      Dune::DynamicMatrix< double > Gamma)
+{
+  double t_ = 0;
+  double dt = first_dt;
+  assert(t_end - t_ >= dt);
+  size_t time_step_counter = 0;
+
+  const double save_interval = DSC::FloatCmp::eq(save_step_length, 0.0) ? dt : save_step_length;
+  double next_save_time = t_ + save_interval > t_end ? t_end : t_ + save_interval;
+  size_t save_step_counter = 1;
+
+  // clear solution
+  if (save_solution) {
+    solution.clear();
+    solution.emplace_back(std::make_pair(t_, u_n));
+  }
+  if (write_solution)
+    u_n.visualize(filename_prefix + "_0");
+
+  const auto pattern = assemble_pattern(u_n);
+
+  const auto num_grid_elements = u_n.space().grid_view().size(0);
+
+  DS::LA::EigenRowMajorSparseMatrix< double > jacobian(num_grid_elements, num_grid_elements, pattern);
+  DS::LA::EigenRowMajorSparseMatrix< double > system_matrix(num_grid_elements, num_grid_elements, pattern);
+
+  // transform variables for faster calculations, C = diag(1/gamma, ... , 1/gamma) - Gamma^(-1),
+  // A_new = A*Gamma^(-1), m = (b_1,...,b_n)*Gamma^(-1)
+  auto Gamma_inv = Gamma;
+  Gamma_inv.invert();
+  auto C = Gamma_inv;
+  C *= -1.0;
+  for (size_t ii = 0; ii < C.rows(); ++ii)
+    C[ii][ii] += 1.0/Gamma[ii][ii];
+  A.rightmultiply(Gamma_inv);
+  auto m_1 = b_1;
+  Gamma_inv.mtv(b_1, m_1);
+  auto m_2 = b_2;
+  Gamma_inv.mtv(b_2, m_2);
+  const auto gamma = Gamma[0][0];
+
+  while (t_ + dt < t_end)
+  {
+    // do a timestep
+    dt = step_rosenbrock(t_, dt, dx, dmu, u_n, A, m_1, m_2, c, d, C, gamma, jacobian, system_matrix);
+
+    // check if data should be written in this timestep (and write)
+    if (DSC::FloatCmp::ge(t_, next_save_time - 1e-10)) {
+      if (save_solution)
+        solution.emplace_back(std::make_pair(t_, u_n));
+      if (write_solution)
+        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      next_save_time += save_interval;
+      ++save_step_counter;
+    }
+
+    // augment time step counter
+    ++time_step_counter;
+  } // while (t_ < t_end)
+
+  // do last step s.t. it matches t_end exactly
+  if (!DSC::FloatCmp::ge(t_, t_end - 1e-10)) {
+    step_rosenbrock(t_, t_end - t_, dx, dmu, u_n, A, m_1, m_2, c, d, C, gamma, jacobian, system_matrix);
+    solution.emplace_back(std::make_pair(t_, u_n));
+  }
+} // ... solve_rosenbrock(...)
 
 template <class FDDiscreteFunction, class IntegratedDiscretFunctionType>
 void integrate_over_mu(const FDDiscreteFunction& u, IntegratedDiscretFunctionType& u_integrated, const double dmu)
@@ -604,7 +1029,7 @@ int main(int argc, char* argv[])
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
     std::cout << "Allocating discrete functions..." << std::endl;
-    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< double > > FVFunctionType;
+    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::EigenDenseVector< double > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
 
     //project initial values
@@ -618,7 +1043,7 @@ int main(int argc, char* argv[])
     const double dx = 3.0/x_grid_size;
     const double dmu = 2.0/mu_grid_size;
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
-    const double CFL = 0.5;
+    const double CFL = 0.1;
     double dt = CFL*dx;
     const double t_end = 0.1;
     const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
@@ -642,63 +1067,84 @@ int main(int argc, char* argv[])
 //                                                                                       + DSC::toString(1.0/8.0, 15) + " 0]"));
 //    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0.5 0.75 1 0]"));
 
-    // Dormand–Prince
+//    // Dormand–Prince
+//    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
+//                                            (std::string("[0 0 0 0 0 0 0;") +
+//                                             " 0.2 0 0 0 0 0 0;" +
+//                                             " 0.075 0.225 0 0 0 0 0;" +
+//                                             " " + DSC::toString(44.0/45.0, 15) + " " + DSC::toString(-56.0/15.0, 15) + " " + DSC::toString(32.0/9.0, 15) + " 0 0 0 0;" +
+//                                             " " + DSC::toString(19372.0/6561.0, 15) + " " + DSC::toString(-25360.0/2187.0, 15) + " " + DSC::toString(64448.0/6561.0, 15) + " " + DSC::toString(-212.0/729.0, 15) + " 0 0 0;" +
+//                                             " " + DSC::toString(9017.0/3168.0, 15) + " " + DSC::toString(-355.0/33.0, 15) + " " + DSC::toString(46732.0/5247.0, 15) + " " + DSC::toString(49.0/176.0, 15) + " " + DSC::toString(-5103.0/18656.0, 15) + " 0 0;" +
+//                                             " " + DSC::toString(35.0/384.0, 15) + " 0 " + DSC::toString(500.0/1113.0, 15) + " " + DSC::toString(125.0/192.0, 15) + " " + DSC::toString(-2187.0/6784.0, 15) + " " + DSC::toString(11.0/84.0, 15) + " 0]"));
+
+//    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("["
+//                                                                                       + DSC::toString(35.0/384.0, 15)
+//                                                                                       + " 0 "
+//                                                                                       + DSC::toString(500.0/1113.0, 15) + " "
+//                                                                                       + DSC::toString(125.0/192.0, 15) + " "
+//                                                                                       + DSC::toString(-2187.0/6784.0, 15) + " "
+//                                                                                       + DSC::toString(11.0/84.0, 15)
+//                                                                                       + " 0]"));
+//    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("["
+//                                                                                       + DSC::toString(5179.0/57600.0, 15)
+//                                                                                       + " 0 "
+//                                                                                       + DSC::toString(7571.0/16695.0, 15) + " "
+//                                                                                       + DSC::toString(393.0/640.0, 15) + " "
+//                                                                                       + DSC::toString(-92097.0/339200.0, 15) + " "
+//                                                                                       + DSC::toString(187.0/2100.0, 15) + " "
+//                                                                                       + DSC::toString(1.0/40.0, 15)
+//                                                                                       + "]"));
+//    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0.2 0.3 0.8 "+ DSC::toString(8.0/9.0, 15) +" 1 1]"));
+
+    // Rosenbrock-Wanner
+//    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
+//                                    ("[0 0; " + DSC::toString(2.0/3.0, 15) + " 0]"));
+//    Dune::DynamicVector< double > b(DSC::fromString< Dune::DynamicVector< double > >("[0.25 0.75]"));
+//    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 " + DSC::toString(2.0/3.0, 15) + "]"));
+//    const double gamma = (1.0 + 1.0/std::sqrt(3))/std::sqrt(2);
+//    Dune::DynamicMatrix< double > Gamma(DSC::fromString< Dune::DynamicMatrix< double > >
+//                                    ("[" + DSC::toString(gamma, 15) + " 0; " + DSC::toString(-4.0/3.0*gamma, 15) + " " + DSC::toString(gamma, 15) + "]"));
+
+    // GRK4T
     Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
-                                            (std::string("[0 0 0 0 0 0 0;") +
-                                             " 0.2 0 0 0 0 0 0;" +
-                                             " 0.075 0.225 0 0 0 0 0;" +
-                                             " " + DSC::toString(44.0/45.0, 15) + " " + DSC::toString(-56.0/15.0, 15) + " " + DSC::toString(32.0/9.0, 15) + " 0 0 0 0;" +
-                                             " " + DSC::toString(19372.0/6561.0, 15) + " " + DSC::toString(-25360.0/2187.0, 15) + " " + DSC::toString(64448.0/6561.0, 15) + " " + DSC::toString(-212.0/729.0, 15) + " 0 0 0;" +
-                                             " " + DSC::toString(9017.0/3168.0, 15) + " " + DSC::toString(-355.0/33.0, 15) + " " + DSC::toString(46732.0/5247.0, 15) + " " + DSC::toString(49.0/176.0, 15) + " " + DSC::toString(-5103.0/18656.0, 15) + " 0 0;" +
-                                             " " + DSC::toString(35.0/384.0, 15) + " 0 " + DSC::toString(500.0/1113.0, 15) + " " + DSC::toString(125.0/192.0, 15) + " " + DSC::toString(-2187.0/6784.0, 15) + " " + DSC::toString(11.0/84.0, 15) + " 0]"));
-
-    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("["
-                                                                                       + DSC::toString(35.0/384.0, 15)
-                                                                                       + " 0 "
-                                                                                       + DSC::toString(500.0/1113.0, 15) + " "
-                                                                                       + DSC::toString(125.0/192.0, 15) + " "
-                                                                                       + DSC::toString(-2187.0/6784.0, 15) + " "
-                                                                                       + DSC::toString(11.0/84.0, 15)
-                                                                                       + " 0]"));
-    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("["
-                                                                                       + DSC::toString(5179.0/57600.0, 15)
-                                                                                       + " 0 "
-                                                                                       + DSC::toString(7571.0/16695.0, 15) + " "
-                                                                                       + DSC::toString(393.0/640.0, 15) + " "
-                                                                                       + DSC::toString(-92097.0/339200.0, 15) + " "
-                                                                                       + DSC::toString(187.0/2100.0, 15) + " "
-                                                                                       + DSC::toString(1.0/40.0, 15)
-                                                                                       + "]"));
-    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0.2 0.3 0.8 "+ DSC::toString(8.0/9.0, 15) +" 1 1]"));
+                                    (std::string("[0 0 0 0;") +
+                                     " 0.462 0 0 0;" +
+                                     " -0.0815668168327 0.961775150166 0 0;" +
+                                     " 0.217487371653 0.486229037990 0 0.296283590357]"));
+    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("[0.217487371653 0.486229037990 0 0.296283590357]"));
+    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("[-0.717088504499 1.77617912176 -0.0590906172617 0]"));
+    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 " + DSC::toString(2.0/3.0, 15) + "]"));
+    Dune::DynamicMatrix< double > Gamma(DSC::fromString< Dune::DynamicMatrix< double > >
+                                        (std::string("[0.231 0 0 0;") +
+                                         " -0.270629667752 0.231 0 0;" +
+                                         " 0.311254483294 0.00852445628482 0.231 0;" +
+                                         " 0.282816832044 -0.457959483281 -0.111208333333 0.231]"));
 
 
-    const auto num_grid_elements = x_grid_size * mu_grid_size;
-    Dune::Stuff::LA::SparsityPatternDefault pattern(num_grid_elements);
-    for (size_t row = 0; row < num_grid_elements; ++row) {
-      pattern.insert(row, row);
-      if (row < num_grid_elements - 1)
-        pattern.insert(row, row+1);
-      if (row > 1)
-        pattern.insert(row, row-1);
+    Dune::DynamicVector< double > d(Gamma.rows());
+    for (size_t ii = 0; ii < Gamma.rows(); ++ii) {
+      d[ii] = 0.0;
+      for (size_t jj = 0; jj <= ii; ++jj)
+        d[ii] += Gamma[ii][jj];
     }
-    DS::LA::EigenRowMajorSparseMatrix< double > jacobian(num_grid_elements, num_grid_elements, pattern);
 
 
-    solve(u,
-          t_end,
-          dt,
-          dx,
-          dmu,
-          saveInterval,
-          true,
-          true,
-          "finite_difference",
-          solution,
-          A,
-          b_1,
-          b_2,
-          c,
-          jacobian);
+    solve_rosenbrock(u,
+                     t_end,
+                     dt,
+                     dx,
+                     dmu,
+                     saveInterval,
+                     true,
+                     true,
+                     "finite_difference_grk4t",
+                     solution,
+                     A,
+                     b_1,
+                     b_2,
+                     c,
+                     d,
+                     Gamma);
 
     typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  XGridType;
 
@@ -734,7 +1180,7 @@ int main(int argc, char* argv[])
       const auto& u_n = pair.second;
       XFVFunctionType u_integrated(x_fv_space, "x_solution");
       integrate_over_mu(u_n, u_integrated, dmu);
-      u_integrated.visualize("fd_integrated_" + DSC::toString(counter));
+      u_integrated.visualize("fd_integrated_grk4t" + DSC::toString(counter));
       ++counter;
     }
 
