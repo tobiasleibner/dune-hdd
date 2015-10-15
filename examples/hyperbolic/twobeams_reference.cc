@@ -280,7 +280,7 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
                                    const double dx,
                                    const double dmu,
                                    DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
-                                   const size_t step)
+                                   const size_t stage)
 {
   const auto& mapper = u_n.space().mapper();
   const auto& grid_view = u_n.space().grid_view();
@@ -330,26 +330,26 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
       }
     }
 
-    if (step == 0) {
+    if (stage == 0) {
       jacobian.set_entry(entity_index, entity_index, -1.0 * sigma_a(t,x) - T(t,x) * (1.0 - mu * mu)/(dmu * dmu));
       if (!on_right_boundary)
-        jacobian.set_entry(entity_index, right_index, mu/(-2.0 *dx));
+        jacobian.set_entry(entity_index, right_index, mu/(-2.0 * dx));
       if (!on_left_boundary)
-        jacobian.set_entry(entity_index, left_index, mu/(2.0 *dx));
+        jacobian.set_entry(entity_index, left_index, mu/(2.0 * dx));
       if (!on_bottom_boundary)
         jacobian.set_entry(entity_index, bottom_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) + mu/dmu);
       if (!on_top_boundary)
         jacobian.set_entry(entity_index, top_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) - mu/dmu);
-    } else {
-      const auto psi_i_k = u_n_vector[entity_index];
-      const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
-      const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
-      const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
-      const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
-      u_update.vector()[entity_index] = -1.0*mu*(psi_iplus1_k-psi_iminus1_k)/(2.0*dx) - sigma_a(t,x)*psi_i_k
-                                                         + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
-                                                                                               - mu*(psi_i_kplus1-psi_i_kminus1)/dmu);
     }
+    const auto psi_i_k = u_n_vector[entity_index];
+    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
+    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
+    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
+    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
+    u_update.vector()[entity_index] = -1.0*mu*(psi_iplus1_k-psi_iminus1_k)/(2.0*dx) - sigma_a(t,x)*psi_i_k
+                                      + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
+                                                                - mu*(psi_i_kplus1-psi_i_kminus1)/dmu);
+
   }
 } // walk_grid_parallel_rosenbrock
 
@@ -528,7 +528,7 @@ double step(double& t,
     auto u_n_tmp = u_n;
     double abs_error = 10.0;
     double rel_error = 10.0;
-    double TOL = 0.0001;
+    double TOL = 0.000001;
     double dt = initial_dt;
     double scale_max = 10;
     double scale_factor = 1.0;
@@ -611,45 +611,24 @@ double step_rosenbrock(double& t,
   typedef typename DS::LA::Solver< typename DS::LA::EigenRowMajorSparseMatrix< double > > SolverType;
   std::unique_ptr< SolverType > solver = DSC::make_unique< SolverType >(system_matrix);
 
-  static DiscreteFunctionType last_stage_of_last_step = u_n;
-  static bool first_step = true;
   const auto num_stages = A_new.rows();
-  std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, last_stage_of_last_step);
+  std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, u_n);
   const auto m_diff = m_2 - m_1;
   auto u_n_tmp = u_n;
-  auto k_i_tmp = last_stage_of_last_step;
+  auto k_i_tmp = u_n;
   auto k_sum = u_n;
-  double abs_error = 10.0;
   double rel_error = 10.0;
-  double TOL = 0.0001;
+  double TOL = 0.000001;
   double dt = initial_dt;
-  double scale_max = 10;
+  double scale_max = 6;
   double scale_factor = 1.0;
-
-  if (first_step) {
-    std::fill(k_i_tmp.vector().begin(), k_i_tmp.vector().end(), 0.0);
-    apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t, dx, dmu, jacobian, 0);
-    apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t, dx, dmu, jacobian, 1);
-    system_matrix = jacobian;
-    system_matrix.scal(-1.0);
-    for (size_t row = 0; row < system_matrix.rows(); ++row)
-      system_matrix.add_to_entry(row, row, 1.0/(gamma*dt));
-    solver = DSC::make_unique< SolverType >(system_matrix);
-    solver->apply(k_i_tmp.vector(), last_stage_of_last_step.vector());
-    first_step = false;
-    std::cout << "first step" << std::endl;
-  }
-
-  double u_n_norm = 0;
-  for (auto& value : u_n.vector()) {
-    u_n_norm += std::abs(value);
-  }
 
   while (rel_error > TOL) {
     dt *= scale_factor;
 
     for (size_t ii = 0; ii < num_stages; ++ii) {
       std::fill(k_i_tmp.vector().begin(), k_i_tmp.vector().end(), 0.0);
+      std::fill(u_intermediate_stages[ii].vector().begin(), u_intermediate_stages[ii].vector().end(), 0.0);
       std::fill(k_sum.vector().begin(), k_sum.vector().end(), 0.0);
       u_n_tmp.vector() = u_n.vector();
       for (size_t jj = 0; jj < ii; ++jj) {
@@ -659,44 +638,38 @@ double step_rosenbrock(double& t,
       apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t+c[ii]*dt, dx, dmu, jacobian, ii);
       // as C_ii is the same for all i, we only need to calculate the matrix in the first step
       if (ii == 0) {
-        u_intermediate_stages[ii].vector() = last_stage_of_last_step.vector();
         // create solver
         system_matrix = jacobian;
         system_matrix.scal(-1.0);
         for (size_t row = 0; row < system_matrix.rows(); ++row)
           system_matrix.add_to_entry(row, row, 1.0/(gamma*dt));
         solver = DSC::make_unique< SolverType >(system_matrix);
-      } else {
+      }
       // fuer explizit zeitabhaengige Funktionen fehlt hier ein Term (siehe Wikipedia)
       // ...
       //
       k_i_tmp.vector() += k_sum.vector();
-      // create solver
+      // solve
       solver->apply(k_i_tmp.vector(), u_intermediate_stages[ii].vector());
-      }
     }
 
     auto error = u_intermediate_stages[0].vector()*m_diff[0];
     for (size_t ii = 1; ii < num_stages; ++ii) {
-      error += u_intermediate_stages[ii].vector()*m_diff[ii];
+      error.axpy(m_diff[ii], u_intermediate_stages[ii].vector());
     }
-    abs_error = 0.0;
-    for (auto& value : error) {
-      abs_error += std::abs(value);
-    }
-    abs_error *= dt;
-    rel_error = abs_error/u_n_norm;
+    // scaling, should use u_nplus1 instead of u_n
+    for (size_t ii = 0; ii < error.size(); ++ii)
+      error[ii] *= std::max(0.05, std::abs(u_n.vector()[ii]));
+    rel_error = error.sup_norm();
     std::cout << rel_error << std::endl;
-    scale_factor = std::min(std::pow(0.9*TOL/rel_error, 1.0/3.0), scale_max);
+    scale_factor = std::min(std::max(0.9*std::pow(TOL/rel_error, 1.0/4.0), 0.2), scale_max);
   }
 
   for (size_t ii = 0; ii < num_stages; ++ii) {
-    u_n.vector().axpy(dt*m_1[ii], u_intermediate_stages[ii].vector());
+    u_n.vector().axpy(m_1[ii], u_intermediate_stages[ii].vector());
   }
 
   t += dt;
-
-  last_stage_of_last_step.vector() = std::move(u_intermediate_stages[num_stages - 1].vector());
 
   std::cout << t << " and dt " << dt << std::endl;
 
@@ -879,13 +852,17 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
   auto C = Gamma_inv;
   C *= -1.0;
   for (size_t ii = 0; ii < C.rows(); ++ii)
-    C[ii][ii] += 1.0/Gamma[ii][ii];
+    C[ii][ii] += 1.0/(Gamma[ii][ii]);
   A.rightmultiply(Gamma_inv);
+//  std::cout << "A: " << DSC::toString(A) << std::endl;
+//  std::cout << "C: " << DSC::toString(C) << std::endl;
   auto m_1 = b_1;
   Gamma_inv.mtv(b_1, m_1);
   auto m_2 = b_2;
   Gamma_inv.mtv(b_2, m_2);
   const auto gamma = Gamma[0][0];
+//  std::cout << "m_1: " << DSC::toString(m_1) << std::endl;
+//  std::cout << "m_2: " << DSC::toString(m_2) << std::endl;
 
   while (t_ + dt < t_end)
   {
@@ -1045,7 +1022,7 @@ int main(int argc, char* argv[])
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
     const double CFL = 0.1;
     double dt = CFL*dx;
-    const double t_end = 0.1;
+    const double t_end = 1;
     const double saveInterval = t_end/100.0 > dt ? t_end/100.0 : dt;
 
     std::vector< std::pair< double, FVFunctionType > > solution;
@@ -1110,7 +1087,7 @@ int main(int argc, char* argv[])
                                     (std::string("[0 0 0 0;") +
                                      " 0.462 0 0 0;" +
                                      " -0.0815668168327 0.961775150166 0 0;" +
-                                     " 0.217487371653 0.486229037990 0 0.296283590357]"));
+                                     " -0.0815668168327 0.961775150166 0 0]"));
     Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("[0.217487371653 0.486229037990 0 0.296283590357]"));
     Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("[-0.717088504499 1.77617912176 -0.0590906172617 0]"));
     Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 " + DSC::toString(2.0/3.0, 15) + "]"));
