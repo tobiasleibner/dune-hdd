@@ -217,7 +217,7 @@ inline double Q(const double /*t*/, const double x, const double /*mu*/) {
 
 inline double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
   if (mu > 0)
-    return on_top_boundary ? 1/dmu : 0.0;
+    return on_top_boundary ? 0.5/dmu : 0.0;
   else
     return psi;
 }
@@ -912,7 +912,6 @@ void solve(DiscreteFunctionType& u_n,
   assert(t_end - t_ >= dt);
   size_t time_step_counter = 0;
 
-  const auto& grid_view = u_n.space().grid_view();
   const auto& x_grid_view = x_fvspace.grid_view();
 
   typedef DiscreteFunction< XFVSpaceType, Dune::Stuff::LA::CommonDenseVector< double > > XFVFunctionType;
@@ -1402,7 +1401,7 @@ int main(int argc, char* argv[])
           dx,
           dmu,
           saveInterval,
-          true,
+          false,
           true,
           filename,
           solution,
