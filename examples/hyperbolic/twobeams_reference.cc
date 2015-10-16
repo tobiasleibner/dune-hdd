@@ -664,10 +664,10 @@ void apply_finite_difference(const DiscreteFunctionType& u_n,
 {
   typedef typename DiscreteFunctionType::SpaceType::GridViewType GridViewType;
 #if DUNE_VERSION_NEWER(DUNE_COMMON,3,9) && HAVE_TBB //EXADUNE
-    const auto num_partitions = DSC_CONFIG_GET("threading.partition_factor", 1u)
+    static const auto num_partitions = DSC_CONFIG_GET("threading.partition_factor", 1u)
                                 * DS::threadManager().current_threads();
-    const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(u_n.space().grid_view(), num_partitions);
-    tbb::blocked_range< std::size_t > blocked_range(0, partitioning->partitions());
+    static const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(u_n.space().grid_view(), num_partitions);
+    static tbb::blocked_range< std::size_t > blocked_range(0, partitioning->partitions());
     Body< Dune::RangedPartitioning< GridViewType, 0 >, DiscreteFunctionType > body(*partitioning,
                                                                                    u_n,
                                                                                    u_update,
@@ -728,17 +728,19 @@ double step(double& t,
 {
     static DiscreteFunctionType last_stage_of_last_step =  create_first_last_stage(u_n, t, dx, dmu);
     static const auto num_stages = A.rows();
-    thread_local static std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, last_stage_of_last_step);
+    static std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, last_stage_of_last_step);
     static const auto b_diff = b_2 - b_1;
     static auto u_n_tmp = u_n;
-    double rel_error = 10.0;
+    double mixed_error = 10.0;
     double dt = initial_dt;
     static double scale_max = 6;
     double scale_factor = 1.0;
+    static auto diff_vector = u_n.vector();
+    static auto diff_vector_size = diff_vector.size();
 
     auto& u_n_vector = u_n.vector();
 
-    while (rel_error > TOL) {
+    while (mixed_error > TOL) {
       dt *= scale_factor;
 
       // fuer zeitunabhaengige funktionen hier hin
@@ -751,17 +753,17 @@ double step(double& t,
         apply_finite_difference(u_n_tmp, u_intermediate_stages[ii], t+c[ii]*dt, dx, dmu);
       }
 
-      auto error = u_intermediate_stages[0].vector()*b_diff[0];
+      diff_vector = u_intermediate_stages[0].vector()*b_diff[0];
       for (size_t ii = 1; ii < num_stages; ++ii)
-        error.axpy(b_diff[ii], u_intermediate_stages[ii].vector());
-      error *= dt;
-      // scaling, should use u_nplus1 instead of u_n
-      for (size_t ii = 0; ii < error.size(); ++ii)
-        error[ii] *= std::abs(u_n_vector[ii]) > 0.01 ? std::abs(u_n_vector[ii]) : 1.0;
-      rel_error = error.sup_norm();
-      std::cout << rel_error << std::endl;
-      scale_factor = std::min(std::max(0.9*std::pow(TOL/rel_error, 1.0/5.0), 0.2), scale_max);
-      std::cout << "Scale: " << scale_factor << std::endl;
+        diff_vector.axpy(b_diff[ii], u_intermediate_stages[ii].vector());
+      diff_vector *= dt;
+      // scaling, use absolute error if norm is less than 0.01, maybe should use u_nplus1 instead of u_n for relative error
+      for (size_t ii = 0; ii < diff_vector_size; ++ii)
+        diff_vector[ii] *= std::abs(u_n_vector[ii]) > 0.01 ? std::abs(u_n_vector[ii]) : 1.0;
+      mixed_error = diff_vector.sup_norm();
+//      std::cout << mixed_error << std::endl;
+      scale_factor = std::min(std::max(0.9*std::pow(TOL/mixed_error, 1.0/5.0), 0.2), scale_max);
+//      std::cout << "Scale: " << scale_factor << std::endl;
     }
 
     for (size_t ii = 0; ii < num_stages; ++ii) {
@@ -1146,14 +1148,16 @@ int main(int argc, char* argv[])
 
     // parse options
     if (argc < 5) {
-      std::cerr << "Usage: " << argv[0] << "-threading.max_count THREADS -global.datadir DIR [-gridsize GRIDSIZE]" << std::endl;
+      std::cerr << "Usage: " << argv[0] << "-threading.max_count THREADS -filename NAME -gridsize_x GRIDSIZE -gridsize_mu GRIDSIZE -TOL TOL -t_end TIME -num_save_steps NUMBER" << std::endl;
       return 1;
     }
     size_t num_threads;
-    std::string output_dir;
+    std::string filename = "twobeams";
     std::string grid_size_x = "1000";
     std::string grid_size_mu = "800";
     double TOL = 0.0001;
+    double t_end = 0.02;
+    double num_save_steps = 100;
     for (int i = 1; i < argc; ++i) {
       if (std::string(argv[i]) == "-threading.max_count") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
@@ -1163,36 +1167,49 @@ int main(int argc, char* argv[])
           std::cerr << "-threading.max_count option requires one argument." << std::endl;
           return 1;
         }
-      } else if (std::string(argv[i]) == "-global.datadir") {
+      } else if (std::string(argv[i]) == "-filename") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          output_dir = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
-          DSC_CONFIG.set("global.datadir", output_dir, true);
+          filename = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
         } else {
-          std::cerr << "-global.datadir option requires one argument." << std::endl;
+          std::cerr << "-filename option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-gridsize_x") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
           grid_size_x = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
         } else {
-          std::cerr << "-gridsize option requires one argument." << std::endl;
+          std::cerr << "-gridsize_x option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-gridsize_mu") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
           grid_size_mu = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
         } else {
-          std::cerr << "-gridsize option requires one argument." << std::endl;
+          std::cerr << "-gridsize_mu option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-TOL") {
-      if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-        TOL = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
-      } else {
-        std::cerr << "-gridsize option requires one argument." << std::endl;
-        return 1;
+        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+          TOL = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+        } else {
+          std::cerr << "-TOL option requires one argument." << std::endl;
+          return 1;
+        }
+      } else if (std::string(argv[i]) == "-t_end") {
+        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+          t_end = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+        } else {
+          std::cerr << "-t_end option requires one argument." << std::endl;
+          return 1;
+        }
+      } else if (std::string(argv[i]) == "-num_save_steps") {
+        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+          num_save_steps = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+        } else {
+          std::cerr << "-num_save_steps option requires one argument." << std::endl;
+          return 1;
+        }
       }
-    }
 
     }
 
@@ -1251,8 +1268,7 @@ int main(int argc, char* argv[])
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
     const double CFL = 0.1;
     double dt = CFL*dx;
-    const double t_end = 0.02;
-    const double saveInterval = t_end/100.0;// > dt ? t_end/100.0 : dt;
+    const double saveInterval = t_end/num_save_steps;// > dt ? t_end/100.0 : dt;
 
     std::vector< std::pair< double, FVFunctionType > > solution;
 
@@ -1388,7 +1404,7 @@ int main(int argc, char* argv[])
           saveInterval,
           true,
           true,
-          "twobeams_fd",
+          filename,
           solution,
           A,
           b_1,
