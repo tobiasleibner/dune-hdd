@@ -169,65 +169,65 @@ void mem_usage() {
 
 // TwoBeams
 
-double sigma_a(const double /*t*/,const double /*x*/) {
-  return 4.0;
+//double sigma_a(const double /*t*/,const double /*x*/) {
+//  return 4.0;
+//}
+
+//double T(const double /*t*/, const double /*x*/) {
+//  return 0;
+//}
+
+//double Q(const double /*t*/, const double /*x*/, const double /*mu*/) {
+//  return 0;
+//}
+
+//double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
+//  if (mu > 0)
+//    return on_top_boundary ? 50.0/dmu : 0.0;
+//  else
+//    return psi;
+//}
+
+//double boundary_conditions_right(const double psi, const double mu, const bool on_bottom_boundary, const double dmu) {
+//  if (mu < 0) {
+//    return on_bottom_boundary ? 50.0/dmu : 0.0;
+//  } else {
+//    return psi;
+//  }
+//}
+
+// SourceBeam
+
+inline double sigma_a(const double /*t*/, const double x) {
+  return x > 2.0 ? 0.0 : 1.0;
 }
 
-double T(const double /*t*/, const double /*x*/) {
-  return 0;
+inline double T(const double /*t*/, const double x) {
+  if (x > 2.0)
+    return 10.0;
+  else if (x > 1.0)
+    return 2.0;
+  else
+    return 0.0;
 }
 
-double Q(const double /*t*/, const double /*x*/, const double /*mu*/) {
-  return 0;
+inline double Q(const double /*t*/, const double x, const double /*mu*/) {
+  return x < 1 || x > 1.5 ? 0.0 : 1.0;
 }
 
-double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
+inline double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
   if (mu > 0)
-    return on_top_boundary ? 50.0/dmu : 0.0;
+    return on_top_boundary ? 1/dmu : 0.0;
   else
     return psi;
 }
 
-double boundary_conditions_right(const double psi, const double mu, const bool on_bottom_boundary, const double dmu) {
-  if (mu < 0) {
-    return on_bottom_boundary ? 50.0/dmu : 0.0;
-  } else {
+inline double boundary_conditions_right(const double psi, const double mu, const bool /*on_bottom_boundary*/, const double /*dmu*/) {
+  if (mu < 0)
+    return 0.0001;
+  else
     return psi;
-  }
 }
-
-// SourceBeam
-
-//inline double sigma_a(const double /*t*/, const double x) {
-//  return x > 2.0 ? 0.0 : 1.0;
-//}
-
-//inline double T(const double /*t*/, const double x) {
-//  if (x > 2.0)
-//    return 10.0;
-//  else if (x > 1.0)
-//    return 2.0;
-//  else
-//    return 0.0;
-//}
-
-//inline double Q(const double /*t*/, const double x, const double /*mu*/) {
-//  return x < 1 || x > 1.5 ? 0.0 : 1.0;
-//}
-
-//inline double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
-//  if (mu > 0)
-//    return on_top_boundary ? 1/dmu : 0.0;
-//  else
-//    return psi;
-//}
-
-//inline double boundary_conditions_right(const double psi, const double mu, const bool /*on_bottom_boundary*/, const double /*dmu*/) {
-//  if (mu < 0)
-//    return 0.0001;
-//  else
-//    return psi;
-//}
 
 inline double central_difference(const double psi_iplus1, const double /*psi_i*/, const double psi_iminus1, const double dx)
 {
@@ -249,8 +249,8 @@ inline double finite_difference(const double psi_iplus1, const double psi_i, con
  return mu < 0 ? (psi_iplus1-psi_i)/dx : (psi_i-psi_iminus1)/dx;
 }
 
-template< class DiscreteFunctionType >
-auto create_map(const DiscreteFunctionType& u_n) -> std::map< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType, typename std::pair< std::vector< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType >, typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate > >
+template< class DiscreteFunctionType, class EntityRange >
+auto create_map(const DiscreteFunctionType& u_n, const EntityRange& entity_range) -> std::map< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType, typename std::pair< std::vector< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType >, typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate > >
 {
 
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
@@ -262,7 +262,7 @@ auto create_map(const DiscreteFunctionType& u_n) -> std::map< typename DiscreteF
     const auto& mapper = u_n.space().mapper();
     const auto& grid_view = u_n.space().grid_view();
     IndexType left_index, right_index, top_index, bottom_index, entity_index;
-    for (const auto& entity : DSC::EntityRange< decltype(grid_view) >(grid_view)) {
+    for (const auto& entity : entity_range) {
       std::vector< IndexType > indices(4);
       const CoordinateType entity_coords = entity.geometry().center();
       entity_index = mapper.mapToGlobal(entity, 0);
@@ -386,7 +386,16 @@ void walk_grid_parallel(const EntityRange& entity_range,
 
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
 
-  static auto index_map = create_map(u_n);
+  thread_local static auto index_map = create_map(u_n, entity_range);
+
+  // reset index_map after
+  //  static const size_t reset_after_steps = 100;
+  //  thread_local static size_t counter = 0;
+  //  ++counter;
+  //  if (counter == reset_after_steps) {
+  //    counter = 0;
+  //    index_map = create_map(u_n, entity_range);
+  //  }
 
   for (const auto& pair : index_map) {
     const auto& entity_index = pair.first;
@@ -425,53 +434,98 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
                                    DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
                                    const size_t stage)
 {
-  const auto& mapper = u_n.space().mapper();
-  const auto& grid_view = u_n.space().grid_view();
+//  const auto& mapper = u_n.space().mapper();
+//  const auto& grid_view = u_n.space().grid_view();
+//  const auto& u_n_vector = u_n.vector();
+//  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
+//  IndexType left_index, right_index, top_index, bottom_index, entity_index;
+//  for (const auto& entity : entity_range) {
+//    bool on_left_boundary(false);
+//    bool on_right_boundary(false);
+//    bool on_top_boundary(false);
+//    bool on_bottom_boundary(false);
+//    const auto entity_coords = entity.geometry().center();
+//    entity_index = mapper.mapToGlobal(entity, 0);
+//    const auto x = entity_coords[0];
+//    const auto mu = entity_coords[1];
+//    // find neighbors
+//    const auto i_it_end = grid_view.iend(entity);
+//    for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
+//      const auto& intersection = *i_it;
+//      const auto intersection_coords = intersection.geometry().center();
+//      if (DSC::FloatCmp::eq(intersection_coords[0], entity_coords[0])) {
+//        if (intersection_coords[1] > entity_coords[1]) {
+//          if (intersection.neighbor())
+//            top_index = mapper.mapToGlobal(intersection.outside(), 0);
+//          else
+//            on_top_boundary = true;
+//        } else {
+//          if (intersection.neighbor())
+//            bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
+//          else
+//            on_bottom_boundary = true;
+//        }
+//      } else if (DSC::FloatCmp::eq(intersection_coords[1], entity_coords[1])) {
+//        if (intersection_coords[0] > entity_coords[0]) {
+//          if (intersection.neighbor())
+//            right_index = mapper.mapToGlobal(intersection.outside(), 0);
+//          else
+//            on_right_boundary = true;
+//        } else {
+//          if (intersection.neighbor())
+//            left_index = mapper.mapToGlobal(intersection.outside(), 0);
+//          else
+//            on_left_boundary = true;
+//        }
+//      } else {
+//        DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
+//      }
+//    }
+
+//    if (stage == 0) {
+//      jacobian.set_entry(entity_index, entity_index, -1.0 * sigma_a(t,x) - T(t,x) * (1.0 - mu * mu)/(dmu * dmu));
+//      if (!on_right_boundary)
+//        jacobian.set_entry(entity_index, right_index, mu/(-2.0 * dx));
+//      if (!on_left_boundary)
+//        jacobian.set_entry(entity_index, left_index, mu/(2.0 * dx));
+//      if (!on_bottom_boundary)
+//        jacobian.set_entry(entity_index, bottom_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) + mu/dmu);
+//      if (!on_top_boundary)
+//        jacobian.set_entry(entity_index, top_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) - mu/dmu);
+//    }
+//    const auto psi_i_k = u_n_vector[entity_index];
+//    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
+//    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
+//    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
+//    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
+//    u_update.vector()[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
+//                                      + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
+//                                                                - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
+
+//  }
+
   const auto& u_n_vector = u_n.vector();
+  auto& u_update_vector = u_update.vector();
+
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
-  IndexType left_index, right_index, top_index, bottom_index, entity_index;
-  for (const auto& entity : entity_range) {
-    bool on_left_boundary(false);
-    bool on_right_boundary(false);
-    bool on_top_boundary(false);
-    bool on_bottom_boundary(false);
-    const auto entity_coords = entity.geometry().center();
-    entity_index = mapper.mapToGlobal(entity, 0);
-    const auto x = entity_coords[0];
-    const auto mu = entity_coords[1];
-    // find neighbors
-    const auto i_it_end = grid_view.iend(entity);
-    for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
-      const auto& intersection = *i_it;
-      const auto intersection_coords = intersection.geometry().center();
-      if (DSC::FloatCmp::eq(intersection_coords[0], entity_coords[0])) {
-        if (intersection_coords[1] > entity_coords[1]) {
-          if (intersection.neighbor())
-            top_index = mapper.mapToGlobal(intersection.outside(), 0);
-          else
-            on_top_boundary = true;
-        } else {
-          if (intersection.neighbor())
-            bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
-          else
-            on_bottom_boundary = true;
-        }
-      } else if (DSC::FloatCmp::eq(intersection_coords[1], entity_coords[1])) {
-        if (intersection_coords[0] > entity_coords[0]) {
-          if (intersection.neighbor())
-            right_index = mapper.mapToGlobal(intersection.outside(), 0);
-          else
-            on_right_boundary = true;
-        } else {
-          if (intersection.neighbor())
-            left_index = mapper.mapToGlobal(intersection.outside(), 0);
-          else
-            on_left_boundary = true;
-        }
-      } else {
-        DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
-      }
-    }
+
+  static auto index_map = create_map(u_n);
+
+  for (const auto& pair : index_map) {
+    const auto& entity_index = pair.first;
+    const auto& indices_pair = pair.second;
+    const auto& indices = indices_pair.first;
+    const auto& left_index = indices[0];
+    const auto& right_index = indices[1];
+    const auto& top_index = indices[2];
+    const auto& bottom_index = indices[3];
+    const auto& coords = indices_pair.second;
+    const auto& x = coords[0];
+    const auto& mu = coords[1];
+    const bool on_left_boundary = left_index == IndexType(-1);
+    const bool on_right_boundary = right_index == IndexType(-1);
+    const bool on_top_boundary = top_index == IndexType(-1);
+    const bool on_bottom_boundary = bottom_index == IndexType(-1);
 
     if (stage == 0) {
       jacobian.set_entry(entity_index, entity_index, -1.0 * sigma_a(t,x) - T(t,x) * (1.0 - mu * mu)/(dmu * dmu));
@@ -492,7 +546,6 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
     u_update.vector()[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
                                       + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
                                                                 - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
-
   }
 } // walk_grid_parallel_rosenbrock
 
@@ -741,17 +794,17 @@ double step_rosenbrock(double& t,
                        const double TOL)
 {
   typedef typename DS::LA::Solver< typename DS::LA::EigenRowMajorSparseMatrix< double > > SolverType;
-  std::unique_ptr< SolverType > solver = DSC::make_unique< SolverType >(system_matrix);
+  static std::unique_ptr< SolverType > solver = DSC::make_unique< SolverType >(system_matrix);
 
-  const auto num_stages = A_new.rows();
-  std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, u_n);
-  const auto m_diff = m_2 - m_1;
-  auto u_n_tmp = u_n;
-  auto k_i_tmp = u_n;
-  auto k_sum = u_n;
+  static const auto num_stages = A_new.rows();
+  thread_local static std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, u_n);
+  static const auto m_diff = m_2 - m_1;
+  static auto u_n_tmp = u_n;
+  static auto k_i_tmp = u_n;
+  static auto k_sum = u_n;
   double rel_error = 10.0;
   double dt = initial_dt;
-  double scale_max = 6;
+  static double scale_max = 6;
   double scale_factor = 1.0;
 
   while (rel_error > TOL) {
@@ -1157,10 +1210,10 @@ int main(int argc, char* argv[])
     size_t mu_grid_size = DSC::fromString< size_t >(grid_size_mu);
     Dune::Stuff::Common::Configuration grid_config;
     grid_config["type"] = "provider.cube";
-    grid_config["lower_left"] = "[-0.5 -1.0]";
-    grid_config["upper_right"] = "[0.5 1.0]";
-//    grid_config["lower_left"] = "[0 -1.0]";
-//    grid_config["upper_right"] = "[3 1.0]";
+//    grid_config["lower_left"] = "[-0.5 -1.0]";
+//    grid_config["upper_right"] = "[0.5 1.0]";
+    grid_config["lower_left"] = "[0 -1.0]";
+    grid_config["upper_right"] = "[3 1.0]";
     grid_config["num_elements"] = "[" + grid_size_x;
     for (size_t ii = 1; ii < 2*dimDomain; ++ii)
         grid_config["num_elements"] += " " + grid_size_mu;
@@ -1182,7 +1235,7 @@ int main(int argc, char* argv[])
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
     std::cout << "Allocating discrete functions..." << std::endl;
-    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::EigenDenseVector< double > > FVFunctionType;
+    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< double > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
 
     //project initial values
@@ -1193,12 +1246,12 @@ int main(int argc, char* argv[])
     //calculate dx and choose t_end and initial dt
     std::cout << "Calculating dx..." << std::endl;
 //    const double dx = 1.0/x_grid_size;
-    const double dx = 1.0/x_grid_size;
+    const double dx = 3.0/x_grid_size;
     const double dmu = 2.0/mu_grid_size;
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
     const double CFL = 0.1;
     double dt = CFL*dx;
-    const double t_end = 1;
+    const double t_end = 0.02;
     const double saveInterval = t_end/100.0;// > dt ? t_end/100.0 : dt;
 
     std::vector< std::pair< double, FVFunctionType > > solution;
@@ -1302,10 +1355,10 @@ int main(int argc, char* argv[])
 
     Dune::Stuff::Common::Configuration x_grid_config;
     x_grid_config["type"] = "provider.cube";
-    x_grid_config["lower_left"] = "[-0.5]";
-    x_grid_config["upper_right"] = "[0.5]";
-//    x_grid_config["lower_left"] = "[0]";
-//    x_grid_config["upper_right"] = "[3]";
+//    x_grid_config["lower_left"] = "[-0.5]";
+//    x_grid_config["upper_right"] = "[0.5]";
+    x_grid_config["lower_left"] = "[0]";
+    x_grid_config["upper_right"] = "[3]";
     x_grid_config["num_elements"] = "[" + grid_size_x;
     x_grid_config["num_elements"] += "]";
 
