@@ -774,7 +774,7 @@ double step(double& t,
 
     t += dt;
 
-    std::cout << t << " and dt " << dt << std::endl;
+//    std::cout << t << " and dt " << dt << std::endl;
 
     return dt*scale_factor;
 }
@@ -948,6 +948,7 @@ void solve(DiscreteFunctionType& u_n,
         integrate_over_mu(u_n, u_integrated, dmu);
         u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
         write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+        std::cout << t_ << " and dt " << dt << std::endl;
       }
       next_save_time += save_interval;
       ++save_step_counter;
@@ -960,7 +961,16 @@ void solve(DiscreteFunctionType& u_n,
   // do last step s.t. it matches t_end exactly
   if (!DSC::FloatCmp::ge(t_, t_end - 1e-10)) {
     step(t_, t_end - t_, dx, dmu, u_n, A, b_1, b_2, c, TOL);
-    solution.emplace_back(std::make_pair(t_, u_n));
+    if (save_solution)
+      solution.emplace_back(std::make_pair(t_, u_n));
+    if (write_solution) {
+//        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      XFVFunctionType u_integrated(x_fvspace, "x_solution");
+      integrate_over_mu(u_n, u_integrated, dmu);
+      u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+      std::cout << t_ << " and dt " << dt << std::endl;
+    }
   }
 } // ... solve(...)
 
