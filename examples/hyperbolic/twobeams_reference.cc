@@ -431,7 +431,7 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
                                    const double t,
                                    const double dx,
                                    const double dmu,
-                                   DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
+                                   DS::LA::EigenRowMajorSparseMatrix< double >& negative_jacobian,
                                    const size_t stage)
 {
 //  const auto& mapper = u_n.space().mapper();
@@ -509,7 +509,7 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
 
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
 
-  static auto index_map = create_map(u_n);
+  thread_local static auto index_map = create_map(u_n, entity_range);
 
   for (const auto& pair : index_map) {
     const auto& entity_index = pair.first;
@@ -528,15 +528,24 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
     const bool on_bottom_boundary = bottom_index == IndexType(-1);
 
     if (stage == 0) {
-      jacobian.set_entry(entity_index, entity_index, -1.0 * sigma_a(t,x) - T(t,x) * (1.0 - mu * mu)/(dmu * dmu));
+      negative_jacobian.set_entry(entity_index, entity_index,
+                                  mu < 0
+                                  ? -mu/dx + sigma_a(t,x) + T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - mu/dmu)
+                                  :  mu/dx + sigma_a(t,x) + T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + mu/dmu));
       if (!on_right_boundary)
-        jacobian.set_entry(entity_index, right_index, mu/(-2.0 * dx));
+        negative_jacobian.set_entry(entity_index, right_index, mu < 0 ? mu/dx : 0.0);
       if (!on_left_boundary)
-        jacobian.set_entry(entity_index, left_index, mu/(2.0 * dx));
+        negative_jacobian.set_entry(entity_index, left_index, mu < 0 ? 0.0 : -mu/dx);
       if (!on_bottom_boundary)
-        jacobian.set_entry(entity_index, bottom_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) + mu/dmu);
+        negative_jacobian.set_entry(entity_index, bottom_index,
+                                    mu < 0
+                                    ? -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu))
+                                    : -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + 2.0*mu/dmu));
       if (!on_top_boundary)
-        jacobian.set_entry(entity_index, top_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) - mu/dmu);
+        negative_jacobian.set_entry(entity_index, top_index,
+                                    mu < 0
+                                    ? -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - 2.0*mu/dmu)
+                                    : -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu)));
     }
     const auto psi_i_k = u_n_vector[entity_index];
     const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
@@ -746,7 +755,7 @@ double step(double& t,
       // fuer zeitunabhaengige funktionen hier hin
       u_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
       for (size_t ii = 1; ii < num_stages; ++ii) {
-        std::fill(u_intermediate_stages[ii].vector().begin(), u_intermediate_stages[ii].vector().end(), 0.0);
+//        std::fill(u_intermediate_stages[ii].vector().begin(), u_intermediate_stages[ii].vector().end(), 0.0);
         u_n_tmp.vector() = u_n_vector;
         for (size_t jj = 0; jj < ii; ++jj)
           u_n_tmp.vector().axpy(dt*(A[ii][jj]), u_intermediate_stages[jj].vector());
@@ -791,7 +800,7 @@ double step_rosenbrock(double& t,
                        Dune::DynamicVector< double >& /*d*/,
                        Dune::DynamicMatrix< double >& C,
                        const double gamma,
-                       DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
+                       DS::LA::EigenRowMajorSparseMatrix< double >& negative_jacobian,
                        DS::LA::EigenRowMajorSparseMatrix< double >& system_matrix,
                        const double TOL)
 {
@@ -804,29 +813,25 @@ double step_rosenbrock(double& t,
   static auto u_n_tmp = u_n;
   static auto k_i_tmp = u_n;
   static auto k_sum = u_n;
-  double rel_error = 10.0;
+  double mixed_error = 10.0;
   double dt = initial_dt;
   static double scale_max = 6;
   double scale_factor = 1.0;
+  static auto diff_vector = u_n.vector();
+  static auto diff_vector_size = diff_vector.size();
 
-  while (rel_error > TOL) {
+  while (mixed_error > TOL) {
     dt *= scale_factor;
 
     for (size_t ii = 0; ii < num_stages; ++ii) {
-      std::fill(k_i_tmp.vector().begin(), k_i_tmp.vector().end(), 0.0);
-      std::fill(u_intermediate_stages[ii].vector().begin(), u_intermediate_stages[ii].vector().end(), 0.0);
-      std::fill(k_sum.vector().begin(), k_sum.vector().end(), 0.0);
       u_n_tmp.vector() = u_n.vector();
-      for (size_t jj = 0; jj < ii; ++jj) {
+      for (size_t jj = 0; jj < ii; ++jj)
         u_n_tmp.vector().axpy(A_new[ii][jj], u_intermediate_stages[jj].vector());
-        k_sum.vector().axpy(C[ii][jj]/dt, u_intermediate_stages[jj].vector());
-      }
-      apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t+c[ii]*dt, dx, dmu, jacobian, ii);
+      apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t+c[ii]*dt, dx, dmu, negative_jacobian, ii);
       // as C_ii is the same for all i, we only need to calculate the matrix in the first step
       if (ii == 0) {
         // create solver
-        system_matrix = jacobian;
-        system_matrix.scal(-1.0);
+        system_matrix = negative_jacobian;
         for (size_t row = 0; row < system_matrix.rows(); ++row)
           system_matrix.add_to_entry(row, row, 1.0/(gamma*dt));
         solver = DSC::make_unique< SolverType >(system_matrix);
@@ -834,21 +839,23 @@ double step_rosenbrock(double& t,
       // fuer explizit zeitabhaengige Funktionen fehlt hier ein Term (siehe Wikipedia)
       // ...
       //
-      k_i_tmp.vector() += k_sum.vector();
+      for (size_t jj = 0; jj < ii; ++jj)
+        k_i_tmp.vector().axpy(C[ii][jj]/dt, u_intermediate_stages[jj].vector());
       // solve
       solver->apply(k_i_tmp.vector(), u_intermediate_stages[ii].vector());
     }
 
-    auto error = u_intermediate_stages[0].vector()*m_diff[0];
+    // calculate error
+    diff_vector = u_intermediate_stages[0].vector()*m_diff[0];
     for (size_t ii = 1; ii < num_stages; ++ii) {
-      error.axpy(m_diff[ii], u_intermediate_stages[ii].vector());
+      diff_vector.axpy(m_diff[ii], u_intermediate_stages[ii].vector());
     }
-    // scaling, should use u_nplus1 instead of u_n
-    for (size_t ii = 0; ii < error.size(); ++ii)
-      error[ii] *= std::abs(u_n.vector()[ii]) > 0.01 ? std::abs(u_n.vector()[ii]) : 1.0;
-    rel_error = error.sup_norm();
-    std::cout << rel_error << std::endl;
-    scale_factor = std::min(std::max(0.9*std::pow(TOL/rel_error, 1.0/4.0), 0.2), scale_max);
+    // scaling, use absolute error if norm is less than 0.01, maybe should use u_nplus1 instead of u_n for relative error
+    for (size_t ii = 0; ii < diff_vector_size; ++ii)
+      diff_vector[ii] *= std::abs(u_n.vector()[ii]) > 0.01 ? std::abs(u_n.vector()[ii]) : 1.0;
+    mixed_error = diff_vector.sup_norm();
+//    std::cout << rel_error << std::endl;
+    scale_factor = std::min(std::max(0.9*std::pow(TOL/mixed_error, 1.0/5.0), 0.2), scale_max);
   }
 
   for (size_t ii = 0; ii < num_stages; ++ii) {
@@ -866,24 +873,28 @@ double step_rosenbrock(double& t,
 template <class FDDiscreteFunction, class IntegratedDiscretFunctionType>
 void integrate_over_mu(const FDDiscreteFunction& u, IntegratedDiscretFunctionType& u_integrated, const double dmu)
 {
-  const auto& grid_view = u.space().grid_view();
-  const auto& x_grid_view = u_integrated.space().grid_view();
-  const auto& mapper = u.space().mapper();
-  const auto& x_mapper = u_integrated.space().mapper();
-  const auto it_end = grid_view.template end< 0 >();
-  for (auto it = grid_view.template begin< 0 >(); it != it_end; ++it) {
+  typedef typename FDDiscreteFunction::SpaceType::GridViewType GridViewType;
+  typedef typename IntegratedDiscretFunctionType::SpaceType::GridViewType XGridViewType;
+  static const auto& grid_view = u.space().grid_view();
+  static const auto& x_grid_view = u_integrated.space().grid_view();
+  static const auto& mapper = u.space().mapper();
+  static auto entity_search = DSG::EntityInlevelSearch< XGridViewType >(x_grid_view);
+  static const auto grid_view_size = grid_view.size(0);
+  static std::vector< typename GridViewType::ctype > entity_x_vector(grid_view_size);
+  static std::vector< typename GridViewType::IndexSet::IndexType > entity_index_vector(grid_view_size);
+  static const auto& x_mapper = u_integrated.space().mapper();
+  static const auto it_end = grid_view.template end< 0 >();
+  size_t counter = 0;
+  for (auto it = grid_view.template begin< 0 >(); it != it_end; ++it, ++counter) {
     const auto& entity = *it;
-    const auto entity_index = mapper.mapToGlobal(entity,0);
+    entity_index_vector[counter] = mapper.mapToGlobal(entity,0);
     const auto entity_coords = entity.geometry().center();
-    const auto x = entity_coords[0];
-    const auto x_it_end = x_grid_view.template end< 0 >();
-    for(auto x_it = x_grid_view.template begin< 0 >(); x_it != x_it_end; ++x_it) {
-      const auto& x_entity = *x_it;
-      if (DSC::FloatCmp::eq(x, x_entity.geometry().center()[0])) {
-        u_integrated.vector()[x_mapper.mapToGlobal(x_entity,0)] += u.vector()[entity_index];
-        break;
-      }
-    }
+    entity_x_vector[counter] = entity_coords[0];
+  }
+  const auto x_entities = entity_search(entity_x_vector);
+  for(size_t ii = 0; ii < grid_view_size; ++ii) {
+    assert(x_entities[ii] != nullptr);
+    u_integrated.vector()[x_mapper.mapToGlobal(*x_entities[ii],0)] += u.vector()[entity_index_vector[ii]];
   }
   u_integrated.vector() *= dmu;
 }
@@ -1066,14 +1077,13 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
   assert(t_end - t_ >= dt);
   size_t time_step_counter = 0;
 
-  const double save_interval = DSC::FloatCmp::eq(save_step_length, 0.0) ? dt : save_step_length;
-  double next_save_time = t_ + save_interval > t_end ? t_end : t_ + save_interval;
-  size_t save_step_counter = 1;
-
-//  const auto& grid_view = u_n.space().grid_view();
   const auto& x_grid_view = x_fvspace.grid_view();
 
   typedef DiscreteFunction< XFVSpaceType, Dune::Stuff::LA::CommonDenseVector< double > > XFVFunctionType;
+
+  const double save_interval = DSC::FloatCmp::eq(save_step_length, 0.0) ? dt : save_step_length;
+  double next_save_time = t_ + save_interval > t_end ? t_end : t_ + save_interval;
+  size_t save_step_counter = 1;
 
   // clear solution
   if (save_solution) {
@@ -1141,8 +1151,15 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
 
   // do last step s.t. it matches t_end exactly
   if (!DSC::FloatCmp::ge(t_, t_end - 1e-10)) {
-    step_rosenbrock(t_, t_end - t_, dx, dmu, u_n, A, m_1, m_2, c, d, C, gamma, jacobian, system_matrix, TOL);
-    solution.emplace_back(std::make_pair(t_, u_n));
+    if (save_solution)
+      solution.emplace_back(std::make_pair(t_, u_n));
+    if (write_solution) {
+      //        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      XFVFunctionType u_integrated(x_fvspace, "x_solution");
+      integrate_over_mu(u_n, u_integrated, dmu);
+      u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+    }
   }
 } // ... solve_rosenbrock(...)
 
@@ -1154,6 +1171,7 @@ int main(int argc, char* argv[])
     typedef Dune::MPIHelper MPIHelper;
     MPIHelper::instance(argc, argv);
     //  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
+//    Eigen::initParallel();
 
     // parse options
     if (argc < 5) {
@@ -1261,7 +1279,7 @@ int main(int argc, char* argv[])
 
     // allocate a discrete function for the concentration and another one to temporary store the update in each step
     std::cout << "Allocating discrete functions..." << std::endl;
-    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::CommonDenseVector< double > > FVFunctionType;
+    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::EigenDenseVector< double > > FVFunctionType;
     FVFunctionType u(fv_space, "solution");
 
     //project initial values
@@ -1299,33 +1317,33 @@ int main(int argc, char* argv[])
 //    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0.5 0.75 1 0]"));
 
     // Dormand–Prince
-    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
-                                    (std::string("[0 0 0 0 0 0 0;") +
-                                     " 0.2 0 0 0 0 0 0;" +
-                                     " 0.075 0.225 0 0 0 0 0;" +
-                                     " " + DSC::toString(44.0/45.0, 15) + " " + DSC::toString(-56.0/15.0, 15) + " " + DSC::toString(32.0/9.0, 15) + " 0 0 0 0;" +
-                                     " " + DSC::toString(19372.0/6561.0, 15) + " " + DSC::toString(-25360.0/2187.0, 15) + " " + DSC::toString(64448.0/6561.0, 15) + " " + DSC::toString(-212.0/729.0, 15) + " 0 0 0;" +
-                                     " " + DSC::toString(9017.0/3168.0, 15) + " " + DSC::toString(-355.0/33.0, 15) + " " + DSC::toString(46732.0/5247.0, 15) + " " + DSC::toString(49.0/176.0, 15) + " " + DSC::toString(-5103.0/18656.0, 15) + " 0 0;" +
-                                     " " + DSC::toString(35.0/384.0, 15) + " 0 " + DSC::toString(500.0/1113.0, 15) + " " + DSC::toString(125.0/192.0, 15) + " " + DSC::toString(-2187.0/6784.0, 15) + " " + DSC::toString(11.0/84.0, 15) + " 0]"));
+//    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
+//                                    (std::string("[0 0 0 0 0 0 0;") +
+//                                     " 0.2 0 0 0 0 0 0;" +
+//                                     " 0.075 0.225 0 0 0 0 0;" +
+//                                     " " + DSC::toString(44.0/45.0, 15) + " " + DSC::toString(-56.0/15.0, 15) + " " + DSC::toString(32.0/9.0, 15) + " 0 0 0 0;" +
+//                                     " " + DSC::toString(19372.0/6561.0, 15) + " " + DSC::toString(-25360.0/2187.0, 15) + " " + DSC::toString(64448.0/6561.0, 15) + " " + DSC::toString(-212.0/729.0, 15) + " 0 0 0;" +
+//                                     " " + DSC::toString(9017.0/3168.0, 15) + " " + DSC::toString(-355.0/33.0, 15) + " " + DSC::toString(46732.0/5247.0, 15) + " " + DSC::toString(49.0/176.0, 15) + " " + DSC::toString(-5103.0/18656.0, 15) + " 0 0;" +
+//                                     " " + DSC::toString(35.0/384.0, 15) + " 0 " + DSC::toString(500.0/1113.0, 15) + " " + DSC::toString(125.0/192.0, 15) + " " + DSC::toString(-2187.0/6784.0, 15) + " " + DSC::toString(11.0/84.0, 15) + " 0]"));
 
-    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("["
-                                                                                       + DSC::toString(35.0/384.0, 15)
-                                                                                       + " 0 "
-                                                                                       + DSC::toString(500.0/1113.0, 15) + " "
-                                                                                       + DSC::toString(125.0/192.0, 15) + " "
-                                                                                       + DSC::toString(-2187.0/6784.0, 15) + " "
-                                                                                       + DSC::toString(11.0/84.0, 15)
-                                                                                       + " 0]"));
-    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("["
-                                                                                       + DSC::toString(5179.0/57600.0, 15)
-                                                                                       + " 0 "
-                                                                                       + DSC::toString(7571.0/16695.0, 15) + " "
-                                                                                       + DSC::toString(393.0/640.0, 15) + " "
-                                                                                       + DSC::toString(-92097.0/339200.0, 15) + " "
-                                                                                       + DSC::toString(187.0/2100.0, 15) + " "
-                                                                                       + DSC::toString(1.0/40.0, 15)
-                                                                                       + "]"));
-    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0.2 0.3 0.8 "+ DSC::toString(8.0/9.0, 15) +" 1 1]"));
+//    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("["
+//                                                                                       + DSC::toString(35.0/384.0, 15)
+//                                                                                       + " 0 "
+//                                                                                       + DSC::toString(500.0/1113.0, 15) + " "
+//                                                                                       + DSC::toString(125.0/192.0, 15) + " "
+//                                                                                       + DSC::toString(-2187.0/6784.0, 15) + " "
+//                                                                                       + DSC::toString(11.0/84.0, 15)
+//                                                                                       + " 0]"));
+//    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("["
+//                                                                                       + DSC::toString(5179.0/57600.0, 15)
+//                                                                                       + " 0 "
+//                                                                                       + DSC::toString(7571.0/16695.0, 15) + " "
+//                                                                                       + DSC::toString(393.0/640.0, 15) + " "
+//                                                                                       + DSC::toString(-92097.0/339200.0, 15) + " "
+//                                                                                       + DSC::toString(187.0/2100.0, 15) + " "
+//                                                                                       + DSC::toString(1.0/40.0, 15)
+//                                                                                       + "]"));
+//    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0.2 0.3 0.8 "+ DSC::toString(8.0/9.0, 15) +" 1 1]"));
 
 
 
@@ -1355,26 +1373,26 @@ int main(int argc, char* argv[])
 
 
     // GRK4A
-//    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
-//                                    (std::string("[0 0 0 0;") +
-//                                     " 0.438 0 0 0;" +
-//                                     " 0.796920457938 0.0730795420615 0 0;" +
-//                                     " 0.796920457938 0.0730795420615 0 0]"));
-//    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("[0.199293275701 0.482645235674 0.0680614886256 0.25]"));
-//    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("[0.346325833758  0.285693175712 0.367980990530 0]"));
-//    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0 0" + DSC::toString(2.0/3.0, 15) + "]"));
-//    Dune::DynamicMatrix< double > Gamma(DSC::fromString< Dune::DynamicMatrix< double > >
-//                                        (std::string("[0.395  0 0 0;") +
-//                                         " -0.767672395484 0.395  0 0;" +
-//                                         " -0.851675323742  0.522967289188 0.395  0;" +
-//                                         " 0.288463109545 0.0880214273381 -0.337389840627 0.395]"));
+    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
+                                    (std::string("[0 0 0 0;") +
+                                     " 0.438 0 0 0;" +
+                                     " 0.796920457938 0.0730795420615 0 0;" +
+                                     " 0.796920457938 0.0730795420615 0 0]"));
+    Dune::DynamicVector< double > b_1(DSC::fromString< Dune::DynamicVector< double > >("[0.199293275701 0.482645235674 0.0680614886256 0.25]"));
+    Dune::DynamicVector< double > b_2(DSC::fromString< Dune::DynamicVector< double > >("[0.346325833758  0.285693175712 0.367980990530 0]"));
+    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0 0" + DSC::toString(2.0/3.0, 15) + "]"));
+    Dune::DynamicMatrix< double > Gamma(DSC::fromString< Dune::DynamicMatrix< double > >
+                                        (std::string("[0.395  0 0 0;") +
+                                         " -0.767672395484 0.395  0 0;" +
+                                         " -0.851675323742  0.522967289188 0.395  0;" +
+                                         " 0.288463109545 0.0880214273381 -0.337389840627 0.395]"));
 
-//    Dune::DynamicVector< double > d(Gamma.rows());
-//    for (size_t ii = 0; ii < Gamma.rows(); ++ii) {
-//      d[ii] = 0.0;
-//      for (size_t jj = 0; jj <= ii; ++jj)
-//        d[ii] += Gamma[ii][jj];
-//    }
+    Dune::DynamicVector< double > d(Gamma.rows());
+    for (size_t ii = 0; ii < Gamma.rows(); ++ii) {
+      d[ii] = 0.0;
+      for (size_t jj = 0; jj <= ii; ++jj)
+        d[ii] += Gamma[ii][jj];
+    }
 
     typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  XGridType;
 
@@ -1405,42 +1423,42 @@ int main(int argc, char* argv[])
 
     DSC_PROFILER.startTiming("fd.solve");
 
-    solve(u,
-          t_end,
-          dt,
-          dx,
-          dmu,
-          saveInterval,
-          false,
-          true,
-          filename,
-          solution,
-          A,
-          b_1,
-          b_2,
-          c,
-          x_fv_space,
-          TOL);
+//    solve(u,
+//          t_end,
+//          dt,
+//          dx,
+//          dmu,
+//          saveInterval,
+//          false,
+//          true,
+//          filename,
+//          solution,
+//          A,
+//          b_1,
+//          b_2,
+//          c,
+//          x_fv_space,
+//          TOL);
 
 
-//    solve_rosenbrock(u,
-//                     t_end,
-//                     dt,
-//                     dx,
-//                     dmu,
-//                     saveInterval,
-//                     true,
-//                     true,
-//                     "finite_difference_grk4t",
-//                     solution,
-//                     A,
-//                     b_1,
-//                     b_2,
-//                     c,
-//                     d,
-//                     Gamma,
-//                     x_fv_space,
-//                     TOL);
+    solve_rosenbrock(u,
+                     t_end,
+                     dt,
+                     dx,
+                     dmu,
+                     saveInterval,
+                     false,
+                     true,
+                     filename,
+                     solution,
+                     A,
+                     b_1,
+                     b_2,
+                     c,
+                     d,
+                     Gamma,
+                     x_fv_space,
+                     TOL);
 
     DSC_PROFILER.stopTiming("fd.solve");
 
