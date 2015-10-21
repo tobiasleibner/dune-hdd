@@ -1299,7 +1299,7 @@ int main(int argc, char* argv[])
 
     std::vector< std::pair< double, FVFunctionType > > solution;
 
-
+    // use the following with solve
     // Bogacki-Shampine
 //    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
 //                                    ("[0 0 0 0; 0.5 0 0 0; 0 0.75 0 0; "
@@ -1346,16 +1346,7 @@ int main(int argc, char* argv[])
 //    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 0.2 0.3 0.8 "+ DSC::toString(8.0/9.0, 15) +" 1 1]"));
 
 
-
-    // Rosenbrock-Wanner
-//    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
-//                                    ("[0 0; " + DSC::toString(2.0/3.0, 15) + " 0]"));
-//    Dune::DynamicVector< double > b(DSC::fromString< Dune::DynamicVector< double > >("[0.25 0.75]"));
-//    Dune::DynamicVector< double > c(DSC::fromString< Dune::DynamicVector< double > >("[0 " + DSC::toString(2.0/3.0, 15) + "]"));
-//    const double gamma = (1.0 + 1.0/std::sqrt(3))/std::sqrt(2);
-//    Dune::DynamicMatrix< double > Gamma(DSC::fromString< Dune::DynamicMatrix< double > >
-//                                    ("[" + DSC::toString(gamma, 15) + " 0; " + DSC::toString(-4.0/3.0*gamma, 15) + " " + DSC::toString(gamma, 15) + "]"));
-
+    // use the following with solve_rosenbrock
     // GRK4T
 //    Dune::DynamicMatrix< double > A(DSC::fromString< Dune::DynamicMatrix< double > >
 //                                    (std::string("[0 0 0 0;") +
@@ -1387,6 +1378,7 @@ int main(int argc, char* argv[])
                                          " -0.851675323742  0.522967289188 0.395  0;" +
                                          " 0.288463109545 0.0880214273381 -0.337389840627 0.395]"));
 
+    // this is unused by now, but you need to uncomment it whenever you use solve_rosenbrock and comment otherwise
     Dune::DynamicVector< double > d(Gamma.rows());
     for (size_t ii = 0; ii < Gamma.rows(); ++ii) {
       d[ii] = 0.0;
