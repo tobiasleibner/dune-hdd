@@ -35,82 +35,48 @@
 #include <boost/filesystem.hpp>
 
 #include <dune/common/parallel/mpihelper.hh>
-#include <dune/common/fvector.hh>
 
 #include <dune/stuff/common/string.hh>
 #include <dune/stuff/common/profiler.hh>
 #include <dune/stuff/grid/provider/cube.hh>
 #include <dune/stuff/grid/information.hh>
+#include <dune/stuff/grid/search.hh>
+#include <dune/stuff/functions/constant.hh>
 #include <dune/stuff/la/container/common.hh>
 #include <dune/stuff/la/container/pattern.hh>
-#include <dune/stuff/playground/functions/composition.hh>
 
 #include <dune/gdt/discretefunction/default.hh>
-#include <dune/gdt/operators/advection.hh>
 #include <dune/gdt/operators/projections.hh>
-#include <dune/gdt/spaces/fv/defaultproduct.hh>
-#include <dune/gdt/timestepper/rungekutta.hh>
-//#include <dune/gdt/playground/functions/entropymomentfunction.hh>
+#include <dune/gdt/spaces/fv/default.hh>
 
-#include <dune/hdd/hyperbolic/problems/twobeams.hh>
-#include <dune/hdd/hyperbolic/problems/twopulses.hh>
-#include <dune/hdd/hyperbolic/problems/rectangularic.hh>
-#include <dune/hdd/hyperbolic/problems/sourcebeam.hh>
-#include <dune/hdd/hyperbolic/problems/onebeam.hh>
-#include <dune/hdd/hyperbolic/problems/transport.hh>
-#include <dune/hdd/hyperbolic/problems/2dboltzmann.hh>
-#include <dune/hdd/hyperbolic/problems/2dboltzmanncheckerboard.hh>
-#include <dune/hdd/hyperbolic/problems/shallowwater.hh>
 
 using namespace Dune::GDT;
-using namespace Dune::HDD;
 
-template< class GridViewType, class SolutionType >
-void write_solution_to_csv(const GridViewType& grid_view, SolutionType solution, const std::string filename)
+/**
+ * Writes a DiscreteFunction step representing the solution at time t to filename.csv. Each row represents one time
+ * step. The values in each row are put in order by the iterator of the grid_view of step. Using a 1D YaspGrid the
+ * values thus are sorted as you would expect with the value for the leftmost entity in the leftmost column and the
+ * value for the rightmost entity in the rightmost column. For 2D or other 1D grids the ordering may be different.
+ * The corresponding time t is written to filename_timesteps.csv. append controls if the new data is appended to
+ * an old file, if existing, or if the old file is removed.
+ **/
+template< class DiscreteFunctionType >
+void write_step_to_csv(const double t,
+                       const DiscreteFunctionType& step,
+                       const std::string filename,
+                       const bool append = true)
 {
-  std::cout << "Writing solution to .csv file..." << std::endl;
+  // get grid_view
+  const auto& grid_view = step.space().grid_view();
   //remove file if already existing
-  std::string timefilename = filename + "_timesteps";
-  remove(filename.c_str());
-  remove(timefilename.c_str());
-  // open empty file
-  std::ofstream output_file(filename, std::ios_base::app);
-  std::ofstream time_output_file(timefilename, std::ios_base::app);
-  // write first line
-  const auto it_end_2 = grid_view.template end< 0 >();
-//  if (write_time_to_first_col)
-//    output_file << ", ";
-//  for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
-//    const auto& entity = *it;
-//    output_file << DSC::toString(entity.geometry().center()[0]);
-//  }
-  //  output_file << std::endl;
-  for (auto& pair : solution) {
-    time_output_file << DSC::toString(pair.first) << std::endl;
-    const auto discrete_func = pair.second;
-    const auto const_it_begin = grid_view.template begin< 0 >();
-    for (auto it = grid_view.template begin< 0 >(); it != it_end_2; ++it) {
-      const auto& entity = *it;
-      if (it != const_it_begin)
-        output_file << ", ";
-      output_file << DSC::toString(discrete_func.local_discrete_function(entity)->evaluate(entity.geometry().local(entity.geometry().center()))[0]);
-    }
-    output_file << std::endl;
-  }
-  output_file.close();
-}
-
-template< class GridViewType, class DiscreteFunctionType >
-void write_step_to_csv(const GridViewType& grid_view, const double t, const DiscreteFunctionType& step, const std::string filename, const bool remove_file)
-{
-  //remove file if already existing
-  std::string timefilename = filename + "_timesteps";
-  if (remove_file) {
-    remove(filename.c_str());
+  const std::string filenamecsv = filename + ".csv";
+  const std::string timefilename = filename + "_timesteps" + ".csv";
+  if (!append) {
+    remove(filenamecsv.c_str());
     remove(timefilename.c_str());
   }
   // open file
-  std::ofstream output_file(filename, std::ios_base::app);
+  std::ofstream output_file(filenamecsv, std::ios_base::app);
   std::ofstream time_output_file(timefilename, std::ios_base::app);
   time_output_file << DSC::toString(t) << std::endl;
   const auto it_end = grid_view.template end< 0 >();
@@ -125,132 +91,158 @@ void write_step_to_csv(const GridViewType& grid_view, const double t, const Disc
   output_file.close();
 }
 
-template< class GridViewType, class SolutionType >
-double compute_L1_norm(const GridViewType& grid_view, const SolutionType solution)
+/**
+ * Problem definitions, notation as in Schneider/Alldredge 2014, dx.doi.org/10.1137/130934210
+ */
+template< class EntityType2D >
+class TwoBeams
 {
-    double norm = 0;
-    for (size_t ii = 0; ii < solution.size(); ++ii) {
-      double spatial_integral = 0;
-      const auto it_end = grid_view.template end< 0 >();
-      for (auto it = grid_view.template begin< 0 >(); it != it_end; ++it) {
-        const auto& entity = *it;
-        double value = std::abs(solution[ii].second.vector()[grid_view.indexSet().index(entity)]);
-        spatial_integral += value*entity.geometry().volume();
-//          std::cout << "value: " << value <<  "entity.geometry.volume: " << entity.geometry().volume() << std::endl;
-      }
-//        const double dt = ii == 0 ? function[ii].first : function[ii].first - function[ii-1].first;
-      const double dt = (ii == solution.size() - 1) ? solution[ii].first - solution[ii-1].first : solution[ii+1].first - solution[ii].first;
-      norm += dt*spatial_integral;
-//        std::cout << "dt = " << dt << ", spatial: " << spatial_integral << std::endl;
-    }
-//      std::cout << "norm: " << norm << std::endl;
-    return norm;
-}
+public:
+  typedef typename DS::Functions::Constant< EntityType2D, double, 2, double, 1, 1 > ConstantFunctionType;
 
-void mem_usage() {
-  auto comm = Dune::MPIHelper::getCollectiveCommunication();
-  // Compute the peak memory consumption of each processes
-  int who = RUSAGE_SELF;
-  struct rusage usage;
-  getrusage(who, &usage);
-  long peakMemConsumption = usage.ru_maxrss;
-  // compute the maximum and mean peak memory consumption over all processes
-  long maxPeakMemConsumption = comm.max(peakMemConsumption);
-  long totalPeakMemConsumption = comm.sum(peakMemConsumption);
-  long meanPeakMemConsumption = totalPeakMemConsumption / comm.size();
-  // write output on rank zero
-  if (comm.rank() == 0) {
-    std::unique_ptr<boost::filesystem::ofstream> memoryConsFile(
-        DSC::make_ofstream(std::string(DSC_CONFIG_GET("global.datadir", "data/")) + std::string("/memory.csv")));
-    *memoryConsFile << "global.maxPeakMemoryConsumption,global.meanPeakMemoryConsumption\n" << maxPeakMemConsumption
-                    << "," << meanPeakMemConsumption << std::endl;
+  inline double sigma_a(const double /*t*/,const double /*x*/) const
+  {
+    return 4.0;
   }
-}
 
-// TwoBeams
+  inline double T(const double /*t*/, const double /*x*/) const
+  {
+    return 0;
+  }
 
-//double sigma_a(const double /*t*/,const double /*x*/) {
-//  return 4.0;
-//}
+  inline double Q(const double /*t*/, const double /*x*/, const double /*mu*/) const
+  {
+    return 0;
+  }
 
-//double T(const double /*t*/, const double /*x*/) {
-//  return 0;
-//}
+  inline double boundary_conditions_left(const double psi,
+                                         const double mu,
+                                         const bool on_top_boundary,
+                                         const double dmu) const
+  {
+    if (mu > 0)
+      return on_top_boundary ? 50.0/dmu : 0.0;
+    else
+      return psi;
+  }
 
-//double Q(const double /*t*/, const double /*x*/, const double /*mu*/) {
-//  return 0;
-//}
+  inline double boundary_conditions_right(const double psi,
+                                          const double mu,
+                                          const bool on_bottom_boundary,
+                                          const double dmu) const
+  {
+    if (mu < 0)
+      return on_bottom_boundary ? 50.0/dmu : 0.0;
+    else
+      return psi;
+  }
 
-//double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
-//  if (mu > 0)
-//    return on_top_boundary ? 50.0/dmu : 0.0;
-//  else
-//    return psi;
-//}
+  ConstantFunctionType initial_values() const
+  {
+    return ConstantFunctionType(0.0001);
+  }
 
-//double boundary_conditions_right(const double psi, const double mu, const bool on_bottom_boundary, const double dmu) {
-//  if (mu < 0) {
-//    return on_bottom_boundary ? 50.0/dmu : 0.0;
-//  } else {
-//    return psi;
-//  }
-//}
+  static DSC::Configuration default_grid_config()
+  {
+    DSC::Configuration grid_config_2d;
+    grid_config_2d["type"] = "provider.cube";
+    grid_config_2d["lower_left"] = "[-0.5 -1.0]";
+    grid_config_2d["upper_right"] = "[0.5 1.0]";
+    grid_config_2d["num_elements"] = "[100 200]";
+    return grid_config_2d;
+  }
+}; // class TwoBeams
 
-// SourceBeam
 
-inline double sigma_a(const double /*t*/, const double x) {
-  return x > 2.0 ? 0.0 : 1.0;
-}
-
-inline double T(const double /*t*/, const double x) {
-  if (x > 2.0)
-    return 10.0;
-  else if (x > 1.0)
-    return 2.0;
-  else
-    return 0.0;
-}
-
-inline double Q(const double /*t*/, const double x, const double /*mu*/) {
-  return x < 1 || x > 1.5 ? 0.0 : 1.0;
-}
-
-inline double boundary_conditions_left(const double psi, const double mu, const bool on_top_boundary, const double dmu) {
-  if (mu > 0)
-    return on_top_boundary ? 0.5/dmu : 0.0;
-  else
-    return psi;
-}
-
-inline double boundary_conditions_right(const double psi, const double mu, const bool /*on_bottom_boundary*/, const double /*dmu*/) {
-  if (mu < 0)
-    return 0.0001;
-  else
-    return psi;
-}
-
-inline double central_difference(const double psi_iplus1, const double /*psi_i*/, const double psi_iminus1, const double dx)
+template< class EntityType2D >
+class SourceBeam
 {
- return (psi_iplus1-psi_iminus1)/(2.0*dx);
-}
+public:
+  typedef typename DS::Functions::Constant< EntityType2D, double, 2, double, 1, 1 > ConstantFunctionType;
 
-inline double backward_difference(const double /*psi_iplus1*/, const double psi_i, const double psi_iminus1, const double dx)
-{
- return (psi_i-psi_iminus1)/dx;
-}
+  inline double sigma_a(const double /*t*/, const double x) const
+  {
+    return x > 2.0 ? 0.0 : 1.0;
+  }
 
-inline double forward_difference(const double psi_iplus1, const double psi_i, const double /*psi_iminus1*/, const double dx)
-{
- return (psi_iplus1-psi_i)/dx;
-}
+  inline double T(const double /*t*/, const double x) const
+  {
+    if (x > 2.0)
+      return 10.0;
+    else if (x > 1.0)
+      return 2.0;
+    else
+      return 0.0;
+  }
 
-inline double finite_difference(const double psi_iplus1, const double psi_i, const double psi_iminus1, const double dx, const double mu)
+  inline double Q(const double /*t*/, const double x, const double /*mu*/) const
+  {
+    return x < 1 || x > 1.5 ? 0.0 : 1.0;
+  }
+
+  inline double boundary_conditions_left(const double psi,
+                                         const double mu,
+                                         const bool on_top_boundary,
+                                         const double dmu) const
+  {
+    if (mu > 0)
+      return on_top_boundary ? 0.5/dmu : 0.0;
+    else
+      return psi;
+  }
+
+  inline double boundary_conditions_right(const double psi,
+                                          const double mu,
+                                          const bool /*on_bottom_boundary*/,
+                                          const double /*dmu*/) const
+  {
+    if (mu < 0)
+      return 0.0001;
+    else
+      return psi;
+  }
+
+  ConstantFunctionType initial_values() const
+  {
+    return ConstantFunctionType(0.0001);
+  }
+
+  static DSC::Configuration default_grid_config()
+  {
+    DSC::Configuration grid_config_2d;
+    grid_config_2d["type"] = "provider.cube";
+    grid_config_2d["lower_left"] = "[0 -1.0]";
+    grid_config_2d["upper_right"] = "[3 1.0]";
+    grid_config_2d["num_elements"] = "[300 200]";
+    return grid_config_2d;
+  }
+}; // class SourceBeam
+
+
+//! forward or backward finite difference depending on the sign of mu
+inline double finite_difference(const double psi_iplus1,
+                                const double psi_i,
+                                const double psi_iminus1,
+                                const double dx,
+                                const double mu)
 {
  return mu < 0 ? (psi_iplus1-psi_i)/dx : (psi_i-psi_iminus1)/dx;
 }
 
+/**
+ * Creates a map from entity indices to a pair containing a vector of indices of its neighbors and the
+ * entity's coordinates. The order of the neighbors in the first part of the pair is left, right, top, bottom. If the
+ * entity is on the boundary, the indices of the non-existing neighbors are set to IndexType(-1), which is, as IndexType
+ * is unsigned, the highest number IndexType can represent.
+ * This map is created in the first time step and used in all subsequent steps instead of the grid_view. Without this
+ * map, the neighbors had to be found in every time step which is quite slow.
+ */
 template< class DiscreteFunctionType, class EntityRange >
-auto create_map(const DiscreteFunctionType& u_n, const EntityRange& entity_range) -> std::map< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType, typename std::pair< std::vector< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType >, typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate > >
+auto create_map(const DiscreteFunctionType& u_n, const EntityRange& entity_range)
+      -> std::map< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType,
+                   typename std::pair<
+                             std::vector< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType >,
+                             typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate > >
 {
 
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
@@ -387,15 +379,6 @@ void walk_grid_parallel(const EntityRange& entity_range,
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
 
   thread_local static auto index_map = create_map(u_n, entity_range);
-
-  // reset index_map after
-  //  static const size_t reset_after_steps = 100;
-  //  thread_local static size_t counter = 0;
-  //  ++counter;
-  //  if (counter == reset_after_steps) {
-  //    counter = 0;
-  //    index_map = create_map(u_n, entity_range);
-  //  }
 
   for (const auto& pair : index_map) {
     const auto& entity_index = pair.first;
@@ -552,7 +535,7 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
     const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
     const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
     const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
-    u_update.vector()[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
+    u_update_vector[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
                                       + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
                                                                 - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
   }
@@ -752,7 +735,6 @@ double step(double& t,
     while (mixed_error > TOL) {
       dt *= scale_factor;
 
-      // fuer zeitunabhaengige funktionen hier hin
       u_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
       for (size_t ii = 1; ii < num_stages; ++ii) {
 //        std::fill(u_intermediate_stages[ii].vector().begin(), u_intermediate_stages[ii].vector().end(), 0.0);
@@ -871,32 +853,38 @@ double step_rosenbrock(double& t,
 
 
 template <class FDDiscreteFunction, class IntegratedDiscretFunctionType>
-void integrate_over_mu(const FDDiscreteFunction& u, IntegratedDiscretFunctionType& u_integrated, const double dmu)
+void integrate_over_mu(const FDDiscreteFunction& psi, IntegratedDiscretFunctionType& psi_integrated, const double dmu)
 {
-  typedef typename FDDiscreteFunction::SpaceType::GridViewType GridViewType;
-  typedef typename IntegratedDiscretFunctionType::SpaceType::GridViewType XGridViewType;
-  static const auto& grid_view = u.space().grid_view();
-  static const auto& x_grid_view = u_integrated.space().grid_view();
-  static const auto& mapper = u.space().mapper();
-  static auto entity_search = DSG::EntityInlevelSearch< XGridViewType >(x_grid_view);
-  static const auto grid_view_size = grid_view.size(0);
-  static std::vector< typename GridViewType::ctype > entity_x_vector(grid_view_size);
-  static std::vector< typename GridViewType::IndexSet::IndexType > entity_index_vector(grid_view_size);
-  static const auto& x_mapper = u_integrated.space().mapper();
-  static const auto it_end = grid_view.template end< 0 >();
+  // get grid views and mapper
+  typedef typename FDDiscreteFunction::SpaceType::GridViewType GridViewType2D;
+  typedef typename IntegratedDiscretFunctionType::SpaceType::GridViewType GridViewType1D;
+  static const auto& grid_view_1d = psi_integrated.space().grid_view();
+  static const auto& grid_view_2d = psi.space().grid_view();
+  static const auto& mapper_1d = psi_integrated.space().mapper();
+  static const auto& mapper_2d = psi.space().mapper();
+  static const auto grid_view_2d_size = grid_view_2d.size(0);
+  // create entitysearch on 1d grid
+  static auto entity_search = DSG::EntityInlevelSearch< GridViewType1D >(grid_view_1d);
+  // create vectors to store the x coordinate and the index of each entity on the 2d grid
+  static std::vector< typename GridViewType2D::ctype > entity_x_vector(grid_view_2d_size);
+  static std::vector< typename GridViewType2D::IndexSet::IndexType > entity_index_vector(grid_view_2d_size);
+  // walk 2d grid to find x coordinate and index of each entity
+  static const auto it_end = grid_view_2d.template end< 0 >();
   size_t counter = 0;
-  for (auto it = grid_view.template begin< 0 >(); it != it_end; ++it, ++counter) {
+  for (auto it = grid_view_2d.template begin< 0 >(); it != it_end; ++it, ++counter) {
     const auto& entity = *it;
-    entity_index_vector[counter] = mapper.mapToGlobal(entity,0);
+    entity_index_vector[counter] = mapper_2d.mapToGlobal(entity,0);
     const auto entity_coords = entity.geometry().center();
     entity_x_vector[counter] = entity_coords[0];
   }
+  // find entities in 1d grid using the x coordinates we collected before
   const auto x_entities = entity_search(entity_x_vector);
-  for(size_t ii = 0; ii < grid_view_size; ++ii) {
+  // integrate over all entities with the same x coordinate in the 2d grid
+  for(size_t ii = 0; ii < grid_view_2d_size; ++ii) {
     assert(x_entities[ii] != nullptr);
-    u_integrated.vector()[x_mapper.mapToGlobal(*x_entities[ii],0)] += u.vector()[entity_index_vector[ii]];
+    psi_integrated.vector()[mapper_1d.mapToGlobal(*x_entities[ii],0)] += psi.vector()[entity_index_vector[ii]];
   }
-  u_integrated.vector() *= dmu;
+  psi_integrated.vector() *= dmu;
 }
 
 
@@ -941,7 +929,7 @@ void solve(DiscreteFunctionType& u_n,
     XFVFunctionType u_integrated(x_fvspace, "x_solution");
     integrate_over_mu(u_n, u_integrated, dmu);
     u_integrated.visualize(filename_prefix + "_0");
-    write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", true);
+    write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
   }
 
   while (t_ + dt < t_end)
@@ -958,7 +946,7 @@ void solve(DiscreteFunctionType& u_n,
         XFVFunctionType u_integrated(x_fvspace, "x_solution");
         integrate_over_mu(u_n, u_integrated, dmu);
         u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+        write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv");
         std::cout << t_ << " and dt " << dt << std::endl;
       }
       next_save_time += save_interval;
@@ -979,7 +967,7 @@ void solve(DiscreteFunctionType& u_n,
       XFVFunctionType u_integrated(x_fvspace, "x_solution");
       integrate_over_mu(u_n, u_integrated, dmu);
       u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+      write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv");
       std::cout << t_ << " and dt " << dt << std::endl;
     }
   }
@@ -1096,7 +1084,7 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
     XFVFunctionType u_integrated(x_fvspace, "x_solution");
     integrate_over_mu(u_n, u_integrated, dmu);
     u_integrated.visualize(filename_prefix + "_0");
-    write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", true);
+    write_step_to_csv(t_, u_integrated, filename_prefix + ".csv", false);
   }
 
   const auto pattern = assemble_pattern(u_n);
@@ -1139,7 +1127,7 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
         XFVFunctionType u_integrated(x_fvspace, "x_solution");
         integrate_over_mu(u_n, u_integrated, dmu);
         u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+        write_step_to_csv(t_, u_integrated, filename_prefix + ".csv");
       }
       next_save_time += save_interval;
       ++save_step_counter;
@@ -1158,146 +1146,156 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
       XFVFunctionType u_integrated(x_fvspace, "x_solution");
       integrate_over_mu(u_n, u_integrated, dmu);
       u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+      write_step_to_csv(t_, u_integrated, filename_prefix + ".csv");
     }
   }
 } // ... solve_rosenbrock(...)
 
-
+/**
+ * main function. Choose problem (TwoBeams or SoureBeam) by uncommenting the right ProblemType.
+ */
 int main(int argc, char* argv[])
 {
   try {
     // setup MPI
     typedef Dune::MPIHelper MPIHelper;
     MPIHelper::instance(argc, argv);
-    //  typename MPIHelper::MPICommunicator world = MPIHelper::getCommunicator();
-//    Eigen::initParallel();
 
-    // parse options
-    if (argc < 5) {
-      std::cerr << "Usage: " << argv[0] << "-threading.max_count THREADS -filename NAME -gridsize_x GRIDSIZE -gridsize_mu GRIDSIZE -TOL TOL -t_end TIME -num_save_steps NUMBER" << std::endl;
-      return 1;
+    // parse options and use default values for options that are not provided
+    if (argc == 1) {
+      std::cout << "Usage: " << argv[0] << "-threading.max_count THREADS -filename NAME -gridsize_x GRIDSIZE -gridsize_mu GRIDSIZE "
+                << "-TOL TOL -t_end TIME -num_save_steps NUMBER" << std::endl;
+      std::cout << "Using default values." << std::endl;
     }
-    size_t num_threads;
+
+    // setup threadmanager
+    DSC_CONFIG.set("threading.partition_factor", 1, true);
+    // default values for options
+    size_t num_threads = 1;
     std::string filename = "twobeams";
-    std::string grid_size_x = "1000";
-    std::string grid_size_mu = "800";
+    std::string grid_size_x = "100";
+    std::string grid_size_mu = "100";
     double TOL = 0.0001;
     double t_end = 0.02;
     double num_save_steps = 100;
-    for (int i = 1; i < argc; ++i) {
+    for (int i = 1; i < argc; i += 2) {
       if (std::string(argv[i]) == "-threading.max_count") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          num_threads = DSC::fromString< size_t >(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+          num_threads = DSC::fromString< size_t >(argv[i+1]); // Increment 'i' so we don't get the argument as the next argv[i].
           DS::threadManager().set_max_threads(num_threads);
         } else {
           std::cerr << "-threading.max_count option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-filename") {
-        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          filename = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
+        if (i + 1 < argc) {
+          filename = argv[i+1];
         } else {
           std::cerr << "-filename option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-gridsize_x") {
-        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          grid_size_x = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
+        if (i + 1 < argc) {
+          grid_size_x = argv[i+1];
         } else {
           std::cerr << "-gridsize_x option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-gridsize_mu") {
-        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          grid_size_mu = argv[++i]; // Increment 'i' so we don't get the argument as the next argv[i].
+        if (i + 1 < argc) {
+          grid_size_mu = argv[i+1];
         } else {
           std::cerr << "-gridsize_mu option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-TOL") {
-        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          TOL = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+        if (i + 1 < argc) {
+          TOL = DSC::fromString<double>(argv[i+1]);
         } else {
           std::cerr << "-TOL option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-t_end") {
-        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          t_end = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+        if (i + 1 < argc) {
+          t_end = DSC::fromString<double>(argv[i+1]);
         } else {
           std::cerr << "-t_end option requires one argument." << std::endl;
           return 1;
         }
       } else if (std::string(argv[i]) == "-num_save_steps") {
-        if (i + 1 < argc) { // Make sure we aren't at the end of argv!
-          num_save_steps = DSC::fromString<double>(argv[++i]); // Increment 'i' so we don't get the argument as the next argv[i].
+        if (i + 1 < argc) {
+          num_save_steps = DSC::fromString<double>(argv[i+1]);
         } else {
           std::cerr << "-num_save_steps option requires one argument." << std::endl;
           return 1;
         }
-      }
-
+      } else
+        std::cerr << "Unrecognized option " << argv[i] << "has been ignored." << std::endl;
     }
 
-    // setup threadmanager
-    DSC_CONFIG.set("threading.partition_factor", 1, true);
     // set dimensions
     static const size_t dimDomain = 1;
 
-    //choose GridType
-    typedef Dune::YaspGrid< 2*dimDomain, Dune::EquidistantOffsetCoordinates< double, 2*dimDomain > >  GridType;
-    typedef typename GridType::Codim< 0 >::Entity                                         EntityType;
+    //choose GridTypes, 2D grid is used for calculations, 1D grid for the solution that is integrated over mu
+    typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  GridType1D;
+    typedef Dune::YaspGrid< 2*dimDomain, Dune::EquidistantOffsetCoordinates< double, 2*dimDomain > >  GridType2D;
+    typedef typename GridType2D::Codim< 0 >::Entity EntityType2D;
 
-    //get grid configuration from problem
-    size_t x_grid_size = DSC::fromString< size_t >(grid_size_x);
-    size_t mu_grid_size = DSC::fromString< size_t >(grid_size_mu);
-    Dune::Stuff::Common::Configuration grid_config;
-    grid_config["type"] = "provider.cube";
-//    grid_config["lower_left"] = "[-0.5 -1.0]";
-//    grid_config["upper_right"] = "[0.5 1.0]";
-    grid_config["lower_left"] = "[0 -1.0]";
-    grid_config["upper_right"] = "[3 1.0]";
-    grid_config["num_elements"] = "[" + grid_size_x;
-    for (size_t ii = 1; ii < 2*dimDomain; ++ii)
-        grid_config["num_elements"] += " " + grid_size_mu;
-    grid_config["num_elements"] += "]";
+    // choose ProblemType
+//    typedef TwoBeams<EntityType2D> ProblemType;
+    typedef SourceBeam<EntityType2D> ProblemType;
 
-    //create grid
-    std::cout << "Creating Grid..." << std::endl;
-    typedef Dune::Stuff::Grid::Providers::Cube< GridType >  GridProviderType;
-    GridProviderType grid_provider = *(GridProviderType::create(grid_config));
-    const std::shared_ptr< const GridType > grid = grid_provider.grid_ptr();
+    // create Problem
+    const ProblemType problem;
 
-    // make a product finite volume space on the leaf grid
-    std::cout << "Creating GridView..." << std::endl;
-    typedef typename GridType::LeafGridView                                        GridViewType;
-    const GridViewType grid_view = grid->leafGridView();
-    typedef Spaces::FV::Default< GridViewType, double, 1, 1 >              FVSpaceType;
-    std::cout << "Creating FiniteVolumeSpace..." << std::endl;
-    const FVSpaceType fv_space(grid_view);
+    //get grid configuration from problem and set the number of elements
+    Dune::Stuff::Common::Configuration grid_config = ProblemType::default_grid_config();
+    grid_config["num_elements"] = "[" + grid_size_x + " " + grid_size_mu + "]";
 
-    // allocate a discrete function for the concentration and another one to temporary store the update in each step
-    std::cout << "Allocating discrete functions..." << std::endl;
-    typedef DiscreteFunction< FVSpaceType, Dune::Stuff::LA::EigenDenseVector< double > > FVFunctionType;
-    FVFunctionType u(fv_space, "solution");
+    //create grids
+    std::cout << "Creating grids..." << std::endl;
+    typedef Dune::Stuff::Grid::Providers::Cube< GridType1D >  GridProviderType1D;
+    typedef Dune::Stuff::Grid::Providers::Cube< GridType2D >  GridProviderType2D;
+    GridProviderType1D grid_provider_1d = *(GridProviderType1D::create(grid_config));
+    GridProviderType2D grid_provider_2d = *(GridProviderType2D::create(grid_config));
+    const std::shared_ptr< const GridType1D > grid_1d = grid_provider_1d.grid_ptr();
+    const std::shared_ptr< const GridType2D > grid_2d = grid_provider_2d.grid_ptr();
+
+    // make finite volume spaces on the leaf grids
+    std::cout << "Creating finite volume spaces..." << std::endl;
+    typedef typename GridType1D::LeafGridView                                        GridViewType1D;
+    typedef typename GridType2D::LeafGridView                                        GridViewType2D;
+    const GridViewType1D grid_view_1d = grid_1d->leafGridView();
+    const GridViewType2D grid_view_2d = grid_2d->leafGridView();
+    typedef Spaces::FV::Default< GridViewType1D, double, dimDomain, 1 >              FVSpaceType1D;
+    typedef Spaces::FV::Default< GridViewType2D, double, dimDomain, 1 >            FVSpaceType2D;
+    const FVSpaceType1D fv_space_1d(grid_view_1d);
+    const FVSpaceType2D fv_space_2d(grid_view_2d);
+
+    // allocate discrete function for psi
+    typedef DiscreteFunction< FVSpaceType2D, Dune::Stuff::LA::EigenDenseVector< double > > DiscreteFunctionType2D;
+    DiscreteFunctionType2D psi(fv_space_2d, "solution");
 
     //project initial values
-    DS::Functions::Constant< EntityType, double, 2, double, 1, 1 > initial_values(0.0001);
+    const auto initial_values = problem.initial_values();
     std::cout << "Projecting initial values..." << std::endl;
-    project(initial_values, u);
+    project(initial_values, psi);
 
-    //calculate dx and choose t_end and initial dt
-    std::cout << "Calculating dx..." << std::endl;
-//    const double dx = 1.0/x_grid_size;
-    const double dx = 3.0/x_grid_size;
-    const double dmu = 2.0/mu_grid_size;
+    //calculate dx and dmu
+    const double x_grid_length = DSC::fromString< std::vector< double > >(grid_config["upper_right"], 2)[0]
+                               - DSC::fromString< std::vector< double > >(grid_config["lower_left"], 2)[0];
+    const double mu_grid_length = DSC::fromString< std::vector< double > >(grid_config["upper_right"], 2)[1]
+                                - DSC::fromString< std::vector< double > >(grid_config["lower_left"], 2)[1];
+    const double dx = x_grid_length/(DSC::fromString< size_t >(grid_size_x));
+    const double dmu = mu_grid_length/(DSC::fromString< size_t >(grid_size_mu));
     std::cout << "dx: " << dx << " dmu: " << dmu << std::endl;
+
+    // set initial time step length
     const double CFL = 0.1;
     double dt = CFL*dx;
-    const double saveInterval = t_end/num_save_steps;// > dt ? t_end/100.0 : dt;
+    const double saveInterval = t_end/num_save_steps;
 
-    std::vector< std::pair< double, FVFunctionType > > solution;
+    std::vector< std::pair< double, DiscreteFunctionType2D > > solution;
 
     // use the following with solve
     // Bogacki-Shampine
@@ -1386,36 +1384,13 @@ int main(int argc, char* argv[])
         d[ii] += Gamma[ii][jj];
     }
 
-    typedef Dune::YaspGrid< dimDomain, Dune::EquidistantOffsetCoordinates< double, dimDomain > >  XGridType;
 
-    Dune::Stuff::Common::Configuration x_grid_config;
-    x_grid_config["type"] = "provider.cube";
-//    x_grid_config["lower_left"] = "[-0.5]";
-//    x_grid_config["upper_right"] = "[0.5]";
-    x_grid_config["lower_left"] = "[0]";
-    x_grid_config["upper_right"] = "[3]";
-    x_grid_config["num_elements"] = "[" + grid_size_x;
-    x_grid_config["num_elements"] += "]";
-
-    //create grid
-    std::cout << "Creating XGrid..." << std::endl;
-    typedef Dune::Stuff::Grid::Providers::Cube< XGridType >  XGridProviderType;
-    XGridProviderType x_grid_provider = *(XGridProviderType::create(grid_config));
-    const std::shared_ptr< const XGridType > x_grid = x_grid_provider.grid_ptr();
-
-    // make a product finite volume space on the leaf grid
-    std::cout << "Creating GridView..." << std::endl;
-    typedef typename XGridType::LeafGridView                                        XGridViewType;
-    const XGridViewType x_grid_view = x_grid->leafGridView();
-    typedef Spaces::FV::Default< XGridViewType, double, 1, 1 >              XFVSpaceType;
-    std::cout << "Creating FiniteVolumeSpace..." << std::endl;
-    const XFVSpaceType x_fv_space(x_grid_view);
 
 
 
     DSC_PROFILER.startTiming("fd.solve");
 
-//    solve(u,
+//    solve(psi,
 //          t_end,
 //          dt,
 //          dx,
@@ -1429,11 +1404,11 @@ int main(int argc, char* argv[])
 //          b_1,
 //          b_2,
 //          c,
-//          x_fv_space,
+//          fv_space_1D,
 //          TOL);
 
 
-    solve_rosenbrock(u,
+    solve_rosenbrock(psi,
                      t_end,
                      dt,
                      dx,
@@ -1449,12 +1424,12 @@ int main(int argc, char* argv[])
                      c,
                      d,
                      Gamma,
-                     x_fv_space,
+                     fv_space_1d,
                      TOL);
 
     DSC_PROFILER.stopTiming("fd.solve");
 
-    std::cout << "took: " << DSC_PROFILER.getTiming("fd.solve")/1000.0 << std::endl;
+    std::cout << "took: " << DSC_PROFILER.getTiming("fd.solve")/1000.0 << " seconds." << std::endl;
 
 
     std::cout << " done" << std::endl;
