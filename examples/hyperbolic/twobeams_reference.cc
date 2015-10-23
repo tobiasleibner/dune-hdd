@@ -50,9 +50,9 @@
 using namespace Dune::GDT;
 
 /**
- * Writes a DiscreteFunction step representing the solution at time t to filename.csv. Each row represents one time
- * step. The values in each row are put in order by the iterator of the grid_view of step. Using a 1D YaspGrid the
- * values thus are sorted as you would expect with the value for the leftmost entity in the leftmost column and the
+ * Writes a DiscreteFunction representing the solution at time t to filename.csv. Each row in filename.csv represents
+ * one time step. The values in each row are put in order by the iterator of the grid_view of step. Using a 1D YaspGrid
+ * the values thus are sorted as you would expect with the value for the leftmost entity in the leftmost column and the
  * value for the rightmost entity in the rightmost column. For 2D or other 1D grids the ordering may be different.
  * The corresponding time t is written to filename_timesteps.csv. append controls if the new data is appended to
  * an old file, if existing, or if the old file is removed.
@@ -249,7 +249,7 @@ public:
 /**
  * Timestepper definitions. Notation for Runge-Kutta methods as in
  * https://en.wikipedia.org/wiki/List_of_Runge%E2%80%93Kutta_methods#Embedded_methods, where b_1 is the first row of
- * b coefficients (without asterix) and b_2 the second row (with asterix).
+ * b coefficients (without asterix on wikipedia) and b_2 the second row (with asterix).
  * Notation for Rosenbrock-type methods as in https://de.wikipedia.org/wiki/Rosenbrock-Wanner-Verfahren.
  * To add a time stepping method, add its name to the ChooseTimeStepper enum and provide a specialization of
  * TimeStepper.
@@ -842,6 +842,11 @@ void apply_finite_difference(const DiscreteFunctionType& psi,
 #endif
 }
 
+/**
+ * The embedded Runge-Kutta methods are designed such that the last stage of step n is the first stage of step n+1.
+ * Thus, we do not need to compute the first stage in each time step but simply set it to the last stage of the previous
+ * step. For the first time step, we do not have a stage from the previous time step so we need to calculate it.
+ */
 template< class DiscreteFunctionType, class ProblemType >
 DiscreteFunctionType create_first_last_stage(const DiscreteFunctionType& psi,
                                              const double t,
@@ -849,13 +854,23 @@ DiscreteFunctionType create_first_last_stage(const DiscreteFunctionType& psi,
                                              const double dmu,
                                              DS::LA::EigenRowMajorSparseMatrix< double >& unused_jacobian)
 {
-  DiscreteFunctionType last_stage_of_last_step = psi;
-  last_stage_of_last_step.vector() *= 0.0;
-  apply_finite_difference< DiscreteFunctionType, ProblemType >(psi, last_stage_of_last_step, t, dx, dmu, unused_jacobian, 1);
-  return last_stage_of_last_step;
+  DiscreteFunctionType last_stage_of_previous_step = psi;
+  last_stage_of_previous_step.vector() *= 0.0;
+  apply_finite_difference< DiscreteFunctionType, ProblemType >(psi, last_stage_of_previous_step, t, dx, dmu,
+                                                               unused_jacobian, 1);
+  return last_stage_of_previous_step;
 }
 
-
+/**
+ * Calculates one step of the embedded Runge-Kutta schemes and returns the estimated optimal length for the next time
+ * step. Error is measured as the supnorm of a mixed error vector. The mixed error vector is obtained by first
+ * calculating the difference between the solutions of the two methods in the embedded RK scheme. Each component of the
+ * vector is then either left as is (to get the absolute error, if this component of the solution has norm less than
+ * 0.01) or divided by the absolute value of the solution in this component (to get the relative error, if the norm of
+ * this component is greater than or equal 0.01). The cutoff 0.01 between absolute and relative error is chosen
+ * arbitrarily and may need tuning. If the error is greater than the tolerance TOL, the time step length is reduced
+ * and the step repeated until the error is below the tolerance.
+ */
 template< class DiscreteFunctionType, class ProblemType >
 double step_rk(double& t,
                const double initial_dt,
@@ -869,10 +884,10 @@ double step_rk(double& t,
                DS::LA::EigenRowMajorSparseMatrix< double >& unused_jacobian,
                const double TOL = 0.0001)
 {
-    static DiscreteFunctionType last_stage_of_last_step
+    static DiscreteFunctionType last_stage_of_previous_step
         =  create_first_last_stage< DiscreteFunctionType, ProblemType >(psi_n, t, dx, dmu, unused_jacobian);
     static const auto num_stages = A.rows();
-    static std::vector< DiscreteFunctionType > psi_intermediate_stages(num_stages, last_stage_of_last_step);
+    static std::vector< DiscreteFunctionType > psi_intermediate_stages(num_stages, last_stage_of_previous_step);
     static const auto b_diff = b_2 - b_1;
     static auto psi_n_tmp = psi_n;
     double mixed_error = 10.0;
@@ -886,13 +901,16 @@ double step_rk(double& t,
 
     while (mixed_error > TOL) {
       dt *= scale_factor;
-
-      psi_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
+      // need to make a deep copy here (by using backend()). If no deep copy is done, the vectors of
+      // last_stage_of_previous_step, psi_intermediate_stages[0] and psi_intermediate_stages[num_stages-1] all point to
+      // the same vector (because of the copy on write). This seems to cause strange memory corruption errors when using
+      // multiple threads. TODO: Investigate why this is and why a deep copy here apparently fixes it.
+      psi_intermediate_stages[0].vector() = last_stage_of_previous_step.vector().backend();
       for (size_t ii = 1; ii < num_stages; ++ii) {
         psi_n_tmp.vector() = psi_n_vector;
         for (size_t jj = 0; jj < ii; ++jj)
           psi_n_tmp.vector().axpy(dt*(A[ii][jj]), psi_intermediate_stages[jj].vector());
-        // the 1 as last argument is chosen arbitrarily not to be zero s.t. the jacobian is not assembled
+        // the 1 as last argument is chosen arbitrarily not to be zero s.t. the jacobian will not be assembled
         apply_finite_difference< DiscreteFunctionType, ProblemType >(psi_n_tmp,
                                                                      psi_intermediate_stages[ii],
                                                                      t+c[ii]*dt,
@@ -916,6 +934,7 @@ double step_rk(double& t,
       for (size_t ii = 0; ii < diff_vector_size; ++ii)
         diff_vector[ii] *= std::abs(psi_n_vector[ii]) > 0.01 ? std::abs(psi_n_vector[ii]) : 1.0;
       mixed_error = diff_vector.sup_norm();
+      // scale dt to get the estimated optimal time step length
       scale_factor = std::min(std::max(0.9*std::pow(TOL/mixed_error, 1.0/5.0), 0.2), scale_max);
 
       if (mixed_error > TOL) { // go back from psi_nplus1 to psi_n
@@ -925,13 +944,19 @@ double step_rk(double& t,
     } // while (mixed_error > TOL)
 
 
-    last_stage_of_last_step.vector() = psi_intermediate_stages[num_stages - 1].vector();
+    last_stage_of_previous_step.vector() = psi_intermediate_stages[num_stages - 1].vector();
 
     t += dt;
 
     return dt*scale_factor;
 }
 
+/**
+ * Calculates one step of the Rosenbrock-type schemes and returns the estimated optimal length for the next time step.
+ * Error estimation is done as for the RK schemes (see step_rk). Notation as in
+ * Hairer, Wanner (1996), Solving ordinary differential equations II: Stiff and differential-algebraic problems,
+ * pp 119ff.
+ */
 template< class DiscreteFunctionType, class ProblemType >
 double step_rosenbrock(double& t,
                        const double initial_dt,
@@ -1023,7 +1048,7 @@ double step_rosenbrock(double& t,
   return dt*scale_factor;
 }
 
-
+//! chooses whether to take step_rk or step_rosenbrock
 template< bool is_rosenbrock_type >
 struct ChooseStep
 {
@@ -1098,7 +1123,7 @@ struct ChooseStep< false >
   }
 };
 
-
+//! integrates the 2D finite difference solution over mu = -1 to 1 to get the 1D solution.
 template <class FDDiscreteFunction, class IntegratedDiscretFunctionType>
 void integrate_over_mu(const FDDiscreteFunction& psi, IntegratedDiscretFunctionType& psi_integrated, const double dmu)
 {
@@ -1135,7 +1160,7 @@ void integrate_over_mu(const FDDiscreteFunction& psi, IntegratedDiscretFunctionT
 }
 
 /**
- * Assembles pattern for the jacobian. In our finite difference scheme, the update formula for each entity depends on
+ * Assembles pattern for the jacobian. In the finite difference scheme, the update formula for each entity depends on
  * the value of psi on the entity and the four neighbors (in a cube grid).
  * */
 template< class DiscreteFunctionType >
@@ -1202,7 +1227,17 @@ Dune::Stuff::LA::SparsityPatternDefault assemble_pattern(DiscreteFunctionType& p
   return pattern;
 }
 
-
+/**
+ * @brief Solves the Fokker-Planck test case specified by ProblemType using a finite difference scheme and the
+ * timestepping scheme specified by timestepper.
+ * @param psi_n discrete function containing initial values, is modified in each time step to contain the current
+ * solution.
+ * @param save_step_length specifies at which interval the solution is stored/written. If for example save_step_length
+ * = 0.1, the solution will be saved at times 0, 0.1, 0.2, 0.3, ...
+ * @param save_solution if true, the solution is stored (at the time steps specified by save_step_length) in solution
+ * @param write_solution if true, the solution is written to vtp and csv files at the specified time steps
+ * @param TOL tolerance for the error in each step of the embedded timestepping schemes
+ */
 template <class DiscreteFunctionType, class FVSpaceType1D, class ProblemType, ChooseTimeStepper timestepper >
 void solve(DiscreteFunctionType& psi_n,
            const double t_end,
@@ -1244,7 +1279,9 @@ void solve(DiscreteFunctionType& psi_n,
     write_step_to_csv(t_, psi_integrated, filename_prefix, false);
   }
 
-  // pattern for jacobian J and system_matrix (1/(dt*gamma)*I - J)
+  // pattern for jacobian J and system_matrix (1/(dt*gamma)*I - J), notation as in
+  // Hairer, Wanner (1996), Solving ordinary differential equations II: Stiff and differential-algebraic problems,
+  // pp 119ff.
   const auto pattern = assemble_pattern(psi_n);
 
   const auto num_grid_elements = psi_n.space().grid_view().size(0);
@@ -1284,7 +1321,7 @@ void solve(DiscreteFunctionType& psi_n,
     Gamma_inv.mtv(b_2_copy, b_2);
 
     // this is unused by now, and would have to be transformed in the same way as the other vectors above if explicitly
-    // time-dependent functions were used
+    // time-dependent functions were used, see p. 121 of Hairer, Wanner 1996 (see above)
     d.resize(Gamma.rows());
     for (size_t ii = 0; ii < Gamma.rows(); ++ii) {
       d[ii] = 0.0;
@@ -1295,6 +1332,8 @@ void solve(DiscreteFunctionType& psi_n,
 
   while (t_ + dt < t_end)
   {
+    if (DSC::FloatCmp::ge(t_ + dt, next_save_time - 1e-10))
+      dt = next_save_time - t_;
     // do a timestep
     dt = ChooseStep<is_rosenbrock_type>::template step< DiscreteFunctionType, ProblemType >(t_, dt, dx, dmu,
                                                                                             psi_n,
@@ -1342,7 +1381,10 @@ void solve(DiscreteFunctionType& psi_n,
 } // ... solve(...)
 
 /**
- * main function. Choose problem (TwoBeams or SourceBeam) by uncommenting the correct TestCase.
+ * Main function. Choose test case (TwoBeams or SourceBeam) by uncommenting the correct TestCase and time stepping
+ * algorithm by uncommenting a ChooseTimeStepper. By default, a YaspGrid is chosen but any other axis-parallel
+ * equi-distant cube grid should also work. Grid size, tolerance, end time etc. can be specified as command line
+ * parameters or by changing the corresponding variables (see first lines of the function).
  */
 int main(int argc, char* argv[])
 {
@@ -1438,9 +1480,9 @@ int main(int argc, char* argv[])
 
     // choose TimeStepper
 //    const ChooseTimeStepper timestepper = ChooseTimeStepper::GRK4A;
-//    const ChooseTimeStepper timestepper = ChooseTimeStepper::GRK4T;
+    const ChooseTimeStepper timestepper = ChooseTimeStepper::GRK4T;
 //    const ChooseTimeStepper timestepper = ChooseTimeStepper::RK23;
-    const ChooseTimeStepper timestepper = ChooseTimeStepper::RK45;
+//    const ChooseTimeStepper timestepper = ChooseTimeStepper::RK45;
     typedef TimeStepper< timestepper > TimeStepperType;
 
     //get grid configuration from problem and set the number of elements
