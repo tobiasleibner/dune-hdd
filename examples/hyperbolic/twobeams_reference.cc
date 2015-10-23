@@ -93,32 +93,63 @@ void write_step_to_csv(const double t,
 
 /**
  * Problem definitions, notation as in Schneider/Alldredge 2014, dx.doi.org/10.1137/130934210
+ * To add a test case, add its name to the TestCase enum and provide a specialization of Problem.
  */
-template< class EntityType2D >
-class TwoBeams
+enum class TestCase { TwoBeams, SourceBeam };
+
+template< class EntityType2D, TestCase test_case >
+class Problem
 {
 public:
   typedef typename DS::Functions::Constant< EntityType2D, double, 2, double, 1, 1 > ConstantFunctionType;
 
-  inline double sigma_a(const double /*t*/,const double /*x*/) const
+  static inline double sigma_a(const double /*t*/,const double /*x*/);
+
+  static inline double T(const double /*t*/, const double /*x*/);
+
+  static inline double Q(const double /*t*/, const double /*x*/, const double /*mu*/);
+
+  static inline double boundary_conditions_left(const double psi,
+                                         const double mu,
+                                         const bool on_top_boundary,
+                                         const double dmu);
+
+  static inline double boundary_conditions_right(const double psi,
+                                          const double mu,
+                                          const bool on_bottom_boundary,
+                                          const double dmu);
+
+  static ConstantFunctionType initial_values();
+
+  static DSC::Configuration default_grid_config();
+}; // unspecialized Problem
+
+// TwoBeams
+template< class EntityType2D >
+class Problem< EntityType2D, TestCase::TwoBeams >
+{
+public:
+  typedef typename DS::Functions::Constant< EntityType2D, double, 2, double, 1, 1 > ConstantFunctionType;
+
+  static inline double sigma_a(const double /*t*/,const double /*x*/)
   {
     return 4.0;
   }
 
-  inline double T(const double /*t*/, const double /*x*/) const
+  static inline double T(const double /*t*/, const double /*x*/)
   {
     return 0;
   }
 
-  inline double Q(const double /*t*/, const double /*x*/, const double /*mu*/) const
+  static inline double Q(const double /*t*/, const double /*x*/, const double /*mu*/)
   {
     return 0;
   }
 
-  inline double boundary_conditions_left(const double psi,
+  static inline double boundary_conditions_left(const double psi,
                                          const double mu,
                                          const bool on_top_boundary,
-                                         const double dmu) const
+                                         const double dmu)
   {
     if (mu > 0)
       return on_top_boundary ? 50.0/dmu : 0.0;
@@ -126,10 +157,10 @@ public:
       return psi;
   }
 
-  inline double boundary_conditions_right(const double psi,
+  static inline double boundary_conditions_right(const double psi,
                                           const double mu,
                                           const bool on_bottom_boundary,
-                                          const double dmu) const
+                                          const double dmu)
   {
     if (mu < 0)
       return on_bottom_boundary ? 50.0/dmu : 0.0;
@@ -137,7 +168,7 @@ public:
       return psi;
   }
 
-  ConstantFunctionType initial_values() const
+  static ConstantFunctionType initial_values()
   {
     return ConstantFunctionType(0.0001);
   }
@@ -151,21 +182,21 @@ public:
     grid_config_2d["num_elements"] = "[100 200]";
     return grid_config_2d;
   }
-}; // class TwoBeams
+}; // Problem< ..., TwoBeams >
 
-
+// SourceBeam
 template< class EntityType2D >
-class SourceBeam
+class Problem< EntityType2D, TestCase::SourceBeam >
 {
 public:
   typedef typename DS::Functions::Constant< EntityType2D, double, 2, double, 1, 1 > ConstantFunctionType;
 
-  inline double sigma_a(const double /*t*/, const double x) const
+  static inline double sigma_a(const double /*t*/, const double x)
   {
     return x > 2.0 ? 0.0 : 1.0;
   }
 
-  inline double T(const double /*t*/, const double x) const
+  static inline double T(const double /*t*/, const double x)
   {
     if (x > 2.0)
       return 10.0;
@@ -175,15 +206,15 @@ public:
       return 0.0;
   }
 
-  inline double Q(const double /*t*/, const double x, const double /*mu*/) const
+  static inline double Q(const double /*t*/, const double x, const double /*mu*/)
   {
     return x < 1 || x > 1.5 ? 0.0 : 1.0;
   }
 
-  inline double boundary_conditions_left(const double psi,
+  static inline double boundary_conditions_left(const double psi,
                                          const double mu,
                                          const bool on_top_boundary,
-                                         const double dmu) const
+                                         const double dmu)
   {
     if (mu > 0)
       return on_top_boundary ? 0.5/dmu : 0.0;
@@ -191,10 +222,10 @@ public:
       return psi;
   }
 
-  inline double boundary_conditions_right(const double psi,
+  static inline double boundary_conditions_right(const double psi,
                                           const double mu,
                                           const bool /*on_bottom_boundary*/,
-                                          const double /*dmu*/) const
+                                          const double /*dmu*/)
   {
     if (mu < 0)
       return 0.0001;
@@ -202,7 +233,7 @@ public:
       return psi;
   }
 
-  ConstantFunctionType initial_values() const
+  static ConstantFunctionType initial_values()
   {
     return ConstantFunctionType(0.0001);
   }
@@ -216,7 +247,7 @@ public:
     grid_config_2d["num_elements"] = "[300 200]";
     return grid_config_2d;
   }
-}; // class SourceBeam
+}; // Problem< ..., SourceBeam >
 
 
 //! forward or backward finite difference depending on the sign of mu
@@ -234,88 +265,97 @@ inline double finite_difference(const double psi_iplus1,
  * entity's coordinates. The order of the neighbors in the first part of the pair is left, right, top, bottom. If the
  * entity is on the boundary, the indices of the non-existing neighbors are set to IndexType(-1), which is, as IndexType
  * is unsigned, the highest number IndexType can represent.
- * This map is created in the first time step and used in all subsequent steps instead of the grid_view. Without this
- * map, the neighbors had to be found in every time step which is quite slow.
+ * This map is created in the first time step in walk_grid_parallel (see below) and used in all subsequent steps instead
+ * of the grid_view. Without this map, the neighbors had to be found in every time step which is quite slow.
  */
 template< class DiscreteFunctionType, class EntityRange >
-auto create_map(const DiscreteFunctionType& u_n, const EntityRange& entity_range)
-      -> std::map< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType,
-                   typename std::pair<
-                             std::vector< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType >,
-                             typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate > >
+auto create_map(const DiscreteFunctionType& psi, const EntityRange& entity_range)
+             -> std::map< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType,
+                          typename std::pair<
+             std::vector< typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType >,
+             typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate > >
 {
-
-  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
-
-  typedef typename DiscreteFunctionType::SpaceType::GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate CoordinateType;
+  typedef typename DiscreteFunctionType::SpaceType::GridViewType GridViewType;
+  typedef typename GridViewType::IndexSet::IndexType IndexType;
+  typedef typename GridViewType::template Codim< 0 >::Geometry::GlobalCoordinate CoordinateType;
   typedef typename std::map< IndexType, typename std::pair< std::vector< IndexType >, CoordinateType > > MapType;
   MapType index_map;
 
-    const auto& mapper = u_n.space().mapper();
-    const auto& grid_view = u_n.space().grid_view();
-    IndexType left_index, right_index, top_index, bottom_index, entity_index;
-    for (const auto& entity : entity_range) {
-      std::vector< IndexType > indices(4);
-      const CoordinateType entity_coords = entity.geometry().center();
-      entity_index = mapper.mapToGlobal(entity, 0);
-      const auto& x = entity_coords[0];
-      const auto& mu = entity_coords[1];
-      // find neighbors
-      const auto i_it_end = grid_view.iend(entity);
-      for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
-        const auto& intersection = *i_it;
-        const auto intersection_coords = intersection.geometry().center();
-        if (DSC::FloatCmp::eq(intersection_coords[0], x)) {
-          if (intersection_coords[1] > mu) {
-            if (intersection.neighbor())
-              top_index = mapper.mapToGlobal(intersection.outside(), 0);
-            else
-              top_index = IndexType(-1);
-          } else {
-            if (intersection.neighbor())
-              bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
-            else
-              bottom_index = IndexType(-1);
-          }
-        } else if (DSC::FloatCmp::eq(intersection_coords[1], mu)) {
-          if (intersection_coords[0] > x) {
-            if (intersection.neighbor())
-              right_index = mapper.mapToGlobal(intersection.outside(), 0);
-            else
-              right_index = IndexType(-1);
-          } else {
-            if (intersection.neighbor())
-              left_index = mapper.mapToGlobal(intersection.outside(), 0);
-            else
-              left_index = IndexType(-1);
-          }
+  const auto& mapper = psi.space().mapper();
+  const auto& grid_view = psi.space().grid_view();
+  IndexType left_index, right_index, top_index, bottom_index, entity_index;
+  for (const auto& entity : entity_range) {
+    std::vector< IndexType > indices(4);
+    const CoordinateType entity_coords = entity.geometry().center();
+    entity_index = mapper.mapToGlobal(entity, 0);
+    const auto& x = entity_coords[0];
+    const auto& mu = entity_coords[1];
+    // find neighbors
+    const auto i_it_end = grid_view.iend(entity);
+    for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
+      const auto& intersection = *i_it;
+      const auto intersection_coords = intersection.geometry().center();
+      if (DSC::FloatCmp::eq(intersection_coords[0], x)) {
+        if (intersection_coords[1] > mu) {
+          if (intersection.neighbor())
+            top_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            top_index = IndexType(-1);
         } else {
-          DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
+          if (intersection.neighbor())
+            bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            bottom_index = IndexType(-1);
         }
+      } else if (DSC::FloatCmp::eq(intersection_coords[1], mu)) {
+        if (intersection_coords[0] > x) {
+          if (intersection.neighbor())
+            right_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            right_index = IndexType(-1);
+        } else {
+          if (intersection.neighbor())
+            left_index = mapper.mapToGlobal(intersection.outside(), 0);
+          else
+            left_index = IndexType(-1);
+        }
+      } else {
+        DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
       }
-      indices[0] = left_index;
-      indices[1] = right_index;
-      indices[2] = top_index;
-      indices[3] = bottom_index;
-      index_map.insert(std::make_pair(entity_index, std::make_pair(indices, entity_coords)));
     }
-    return index_map;
+    indices[0] = left_index;
+    indices[1] = right_index;
+    indices[2] = top_index;
+    indices[3] = bottom_index;
+    index_map.insert(std::make_pair(entity_index, std::make_pair(indices, entity_coords)));
+  }
+  return index_map;
 }
 
-
-template< class EntityRange, class DiscreteFunctionType >
-void walk_grid_parallel(const EntityRange& entity_range,
-                        const DiscreteFunctionType& u_n,
-                        DiscreteFunctionType& u_update,
-                        const double t,
-                        const double dx,
-                        const double dmu)
+/**
+ * Computes the update vector for the finite difference scheme. If stage is 0, it also computes the negative jacobian
+ * that is needed in the Rosenbrock-type schemes.
+ * At the first call (per thread), a map is created that maps the index of each entity in entity_range to its
+ * coordinates and the indices of its neighbors (see create_map). After that, the entity_range is ignored and the grid
+ * walk is done by iterating over the list. Thus, the partitioning of the grid with respect to the threads will be the
+ * same for all time steps. If you want to change the partitioning over time or if the index map becomes to
+ * memory-intensive, use the commented code.
+ */
+template< class EntityRange, class DiscreteFunctionType, class ProblemType >
+void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
+                                   const DiscreteFunctionType& psi,
+                                   DiscreteFunctionType& psi_update,
+                                   const double t,
+                                   const double dx,
+                                   const double dmu,
+                                   DS::LA::EigenRowMajorSparseMatrix< double >& negative_jacobian,
+                                   const size_t stage)
 {
   // use this code if index_map becomes too memory-intensive
-//  const auto& mapper = u_n.space().mapper();
-//  const auto& grid_view = u_n.space().grid_view();
-//  const auto& u_n_vector = u_n.vector();
-//  auto& u_update_vector = u_update.vector();
+//  const auto& mapper = psi.space().mapper();
+//  const auto& grid_view = psi.space().grid_view();
+//  const auto& psi_vector = psi.vector();
+//  auto& psi_update_vector = psi_update.vector();
 //  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
 
 //  IndexType left_index, right_index, top_index, bottom_index, entity_index;
@@ -362,137 +402,50 @@ void walk_grid_parallel(const EntityRange& entity_range,
 //      }
 //    }
 
-//    const auto psi_i_k = u_n_vector[entity_index];
-//    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
-//    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
-//    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
-//    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
-//    u_update.vector()[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
-//                                      + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
-//                                                                - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
-//  }
+//    const auto psi_i_k = psi_vector[entity_index];
+//    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : psi_vector[right_index];
+//    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : psi_vector[left_index];
+//    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : psi_vector[top_index];
+//    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : psi_vector[bottom_index];
+//    // finite difference scheme update formula
+//    psi_update_vector[entity_index] = -mu * finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu)
+//                                      - ProblemType::sigma_a(t,x)*psi_i_k
+//                                      + ProblemType::Q(t,x,mu)
+//                                      + 0.5*ProblemType::T(t,x) *
+//                                      ( (1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
+//                                        - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu) );
 
-
-  const auto& u_n_vector = u_n.vector();
-  auto& u_update_vector = u_update.vector();
-
-  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
-
-  thread_local static auto index_map = create_map(u_n, entity_range);
-
-  for (const auto& pair : index_map) {
-    const auto& entity_index = pair.first;
-    const auto& indices_pair = pair.second;
-    const auto& indices = indices_pair.first;
-    const auto& left_index = indices[0];
-    const auto& right_index = indices[1];
-    const auto& top_index = indices[2];
-    const auto& bottom_index = indices[3];
-    const auto& coords = indices_pair.second;
-    const auto& x = coords[0];
-    const auto& mu = coords[1];
-    const bool on_left_boundary = left_index == IndexType(-1);
-    const bool on_right_boundary = right_index == IndexType(-1);
-    const bool on_top_boundary = top_index == IndexType(-1);
-    const bool on_bottom_boundary = bottom_index == IndexType(-1);
-
-    const auto psi_i_k = u_n_vector[entity_index];
-    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
-    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
-    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
-    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
-    u_update_vector[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
-                                    + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
-                                                              - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
-  }
-}
-
-template< class EntityRange, class DiscreteFunctionType >
-void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
-                                   const DiscreteFunctionType& u_n,
-                                   DiscreteFunctionType& u_update,
-                                   const double t,
-                                   const double dx,
-                                   const double dmu,
-                                   DS::LA::EigenRowMajorSparseMatrix< double >& negative_jacobian,
-                                   const size_t stage)
-{
-//  const auto& mapper = u_n.space().mapper();
-//  const auto& grid_view = u_n.space().grid_view();
-//  const auto& u_n_vector = u_n.vector();
-//  typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
-//  IndexType left_index, right_index, top_index, bottom_index, entity_index;
-//  for (const auto& entity : entity_range) {
-//    bool on_left_boundary(false);
-//    bool on_right_boundary(false);
-//    bool on_top_boundary(false);
-//    bool on_bottom_boundary(false);
-//    const auto entity_coords = entity.geometry().center();
-//    entity_index = mapper.mapToGlobal(entity, 0);
-//    const auto x = entity_coords[0];
-//    const auto mu = entity_coords[1];
-//    // find neighbors
-//    const auto i_it_end = grid_view.iend(entity);
-//    for (auto i_it = grid_view.ibegin(entity); i_it != i_it_end; ++i_it) {
-//      const auto& intersection = *i_it;
-//      const auto intersection_coords = intersection.geometry().center();
-//      if (DSC::FloatCmp::eq(intersection_coords[0], entity_coords[0])) {
-//        if (intersection_coords[1] > entity_coords[1]) {
-//          if (intersection.neighbor())
-//            top_index = mapper.mapToGlobal(intersection.outside(), 0);
-//          else
-//            on_top_boundary = true;
-//        } else {
-//          if (intersection.neighbor())
-//            bottom_index = mapper.mapToGlobal(intersection.outside(), 0);
-//          else
-//            on_bottom_boundary = true;
-//        }
-//      } else if (DSC::FloatCmp::eq(intersection_coords[1], entity_coords[1])) {
-//        if (intersection_coords[0] > entity_coords[0]) {
-//          if (intersection.neighbor())
-//            right_index = mapper.mapToGlobal(intersection.outside(), 0);
-//          else
-//            on_right_boundary = true;
-//        } else {
-//          if (intersection.neighbor())
-//            left_index = mapper.mapToGlobal(intersection.outside(), 0);
-//          else
-//            on_left_boundary = true;
-//        }
-//      } else {
-//        DUNE_THROW(Dune::InvalidStateException, "This should not happen!");
-//      }
-//    }
-
+//    // in the first step of the Rosenbrock-type schemes, we have to assemble the jacobian
 //    if (stage == 0) {
-//      jacobian.set_entry(entity_index, entity_index, -1.0 * sigma_a(t,x) - T(t,x) * (1.0 - mu * mu)/(dmu * dmu));
+//      negative_jacobian.set_entry(entity_index, entity_index,
+//                                  mu < 0
+//                                  ? -mu/dx + ProblemType::sigma_a(t,x)
+//                                    + ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - mu/dmu)
+//                                  :  mu/dx + ProblemType::sigma_a(t,x)
+//                                    + ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + mu/dmu));
 //      if (!on_right_boundary)
-//        jacobian.set_entry(entity_index, right_index, mu/(-2.0 * dx));
+//        negative_jacobian.set_entry(entity_index, right_index, mu < 0 ? mu/dx : 0.0);
 //      if (!on_left_boundary)
-//        jacobian.set_entry(entity_index, left_index, mu/(2.0 * dx));
+//        negative_jacobian.set_entry(entity_index, left_index, mu < 0 ? 0.0 : -mu/dx);
 //      if (!on_bottom_boundary)
-//        jacobian.set_entry(entity_index, bottom_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) + mu/dmu);
+//        negative_jacobian.set_entry(entity_index, bottom_index,
+//                                    mu < 0
+//                                    ? -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu))
+//                                    : -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + 2.0*mu/dmu));
 //      if (!on_top_boundary)
-//        jacobian.set_entry(entity_index, top_index, 0.5 * T(t,x) * (1.0 - mu * mu)/(dmu * dmu) - mu/dmu);
+//        negative_jacobian.set_entry(entity_index, top_index,
+//                                    mu < 0
+//                                    ? -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - 2.0*mu/dmu)
+//                                    : -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu)));
 //    }
-//    const auto psi_i_k = u_n_vector[entity_index];
-//    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
-//    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
-//    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
-//    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
-//    u_update.vector()[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
-//                                      + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
-//                                                                - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
-
 //  }
 
-  const auto& u_n_vector = u_n.vector();
-  auto& u_update_vector = u_update.vector();
+  const auto& psi_vector = psi.vector();
+  auto& psi_update_vector = psi_update.vector();
 
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
 
-  thread_local static auto index_map = create_map(u_n, entity_range);
+  thread_local static auto index_map = create_map(psi, entity_range);
 
   for (const auto& pair : index_map) {
     const auto& entity_index = pair.first;
@@ -510,11 +463,34 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
     const bool on_top_boundary = top_index == IndexType(-1);
     const bool on_bottom_boundary = bottom_index == IndexType(-1);
 
+    // i indices refer to the x coordinate, k indices to mu
+    const auto psi_i_k = psi_vector[entity_index];
+    // apply boundary conditions from problem at left and right boundary
+    const auto psi_iplus1_k = on_right_boundary
+                              ? ProblemType::boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu)
+                              : psi_vector[right_index];
+    const auto psi_iminus1_k = on_left_boundary
+                               ? ProblemType::boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu)
+                               : psi_vector[left_index];
+    // zeroth order interpolation on top and bottom boundary
+    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : psi_vector[top_index];
+    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : psi_vector[bottom_index];
+    // finite difference scheme update formula
+    psi_update_vector[entity_index] = -mu * finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu)
+                                      - ProblemType::sigma_a(t,x)*psi_i_k
+                                      + ProblemType::Q(t,x,mu)
+                                      + 0.5*ProblemType::T(t,x) *
+                                          ( (1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
+                                           - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu) );
+
+    // in the first step of the Rosenbrock-type schemes, we have to assemble the jacobian
     if (stage == 0) {
       negative_jacobian.set_entry(entity_index, entity_index,
                                   mu < 0
-                                  ? -mu/dx + sigma_a(t,x) + T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - mu/dmu)
-                                  :  mu/dx + sigma_a(t,x) + T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + mu/dmu));
+                                  ? -mu/dx + ProblemType::sigma_a(t,x)
+                                    + ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - mu/dmu)
+                                  :  mu/dx + ProblemType::sigma_a(t,x)
+                                    + ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + mu/dmu));
       if (!on_right_boundary)
         negative_jacobian.set_entry(entity_index, right_index, mu < 0 ? mu/dx : 0.0);
       if (!on_left_boundary)
@@ -522,24 +498,39 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
       if (!on_bottom_boundary)
         negative_jacobian.set_entry(entity_index, bottom_index,
                                     mu < 0
-                                    ? -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu))
-                                    : -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + 2.0*mu/dmu));
+                                    ? -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu))
+                                    : -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) + 2.0*mu/dmu));
       if (!on_top_boundary)
         negative_jacobian.set_entry(entity_index, top_index,
                                     mu < 0
-                                    ? -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - 2.0*mu/dmu)
-                                    : -0.5 * T(t,x) * ((1.0 - mu * mu)/(dmu * dmu)));
+                                    ? -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu) - 2.0*mu/dmu)
+                                    : -0.5 * ProblemType::T(t,x) * ((1.0 - mu * mu)/(dmu * dmu)));
     }
-    const auto psi_i_k = u_n_vector[entity_index];
-    const auto psi_iplus1_k = on_right_boundary ? boundary_conditions_right(psi_i_k, mu, on_bottom_boundary, dmu) : u_n_vector[right_index];
-    const auto psi_iminus1_k = on_left_boundary ? boundary_conditions_left(psi_i_k, mu, on_top_boundary, dmu) : u_n_vector[left_index];
-    const auto psi_i_kplus1 = on_top_boundary ? psi_i_k : u_n_vector[top_index];
-    const auto psi_i_kminus1 = on_bottom_boundary ? psi_i_k : u_n_vector[bottom_index];
-    u_update_vector[entity_index] = -mu*finite_difference(psi_iplus1_k, psi_i_k, psi_iminus1_k, dx, mu) - sigma_a(t,x)*psi_i_k
-                                      + Q(t,x,mu) + 0.5*T(t,x)*((1.0-mu*mu)*(psi_i_kplus1 - 2.0*psi_i_k + psi_i_kminus1)/(dmu*dmu)
-                                                                - 2.0*mu*finite_difference(psi_i_kplus1, psi_i_k, psi_i_kminus1, dmu, mu));
-  }
+  } // iterate over index_map
 } // walk_grid_parallel_rosenbrock
+
+
+//! for Runge-Kutta time stepping, we do not need to assemble the matrix
+template< class EntityRange, class DiscreteFunctionType, class ProblemType >
+void walk_grid_parallel(const EntityRange& entity_range,
+                        const DiscreteFunctionType& psi,
+                        DiscreteFunctionType& psi_update,
+                        const double t,
+                        const double dx,
+                        const double dmu)
+{
+  static DS::LA::EigenRowMajorSparseMatrix< double > fake_jacobian;
+  // the 1 as last argument is arbitrary chosen not to be zero such that the jacobian is not assembled
+  walk_grid_parallel_rosenbrock< EntityRange, DiscreteFunctionType, ProblemType >(entity_range,
+                                                                                   psi,
+                                                                                   psi_update,
+                                                                                   t,
+                                                                                   dx,
+                                                                                   dmu,
+                                                                                   fake_jacobian,
+                                                                                   1);
+}
+
 
 
 #if HAVE_TBB
@@ -547,14 +538,14 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
   struct Body
   {
     Body(PartitioningType& partitioning,
-         const DiscreteFunctionType& u_n,
-         DiscreteFunctionType& u_update,
+         const DiscreteFunctionType& psi,
+         DiscreteFunctionType& psi_update,
          const double t,
          const double dx,
          const double dmu)
       : partitioning_(partitioning)
-      , u_n_(u_n)
-      , u_update_(u_update)
+      , psi_(psi)
+      , psi_update_(psi_update)
       , t_(t)
       , dx_(dx)
       , dmu_(dmu)
@@ -562,8 +553,8 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
 
     Body(Body& other, tbb::split /*split*/)
       : partitioning_(other.partitioning_)
-      , u_n_(other.u_n_)
-      , u_update_(other.u_update_)
+      , psi_(other.psi_)
+      , psi_update_(other.psi_update_)
       , t_(other.t_)
       , dx_(other.dx_)
       , dmu_(other.dmu_)
@@ -574,7 +565,7 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
       // for all partitions in tbb-range
       for(std::size_t p = range.begin(); p != range.end(); ++p) {
         auto partition = partitioning_.partition(p);
-        walk_grid_parallel(partition, u_n_, u_update_, t_, dx_, dmu_);
+        walk_grid_parallel(partition, psi_, psi_update_, t_, dx_, dmu_);
       }
     }
 
@@ -582,8 +573,8 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
     {}
 
   PartitioningType& partitioning_;
-  const DiscreteFunctionType& u_n_;
-  DiscreteFunctionType& u_update_;
+  const DiscreteFunctionType& psi_;
+  DiscreteFunctionType& psi_update_;
   const double t_;
   const double dx_;
   const double dmu_;
@@ -591,20 +582,20 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
 #endif //HAVE_TBB
 
 #if HAVE_TBB
-  template< class PartitioningType, class DiscreteFunctionType >
+  template< class PartitioningType, class DiscreteFunctionType, class ProblemType >
   struct Body_rosenbrock
   {
     Body_rosenbrock(PartitioningType& partitioning,
-                    const DiscreteFunctionType& u_n,
-                    DiscreteFunctionType& u_update,
+                    const DiscreteFunctionType& psi,
+                    DiscreteFunctionType& psi_update,
                     const double t,
                     const double dx,
                     const double dmu,
                     DS::LA::EigenRowMajorSparseMatrix< double >& jacobian,
                     const size_t stage)
       : partitioning_(partitioning)
-      , u_n_(u_n)
-      , u_update_(u_update)
+      , psi_(psi)
+      , psi_update_(psi_update)
       , t_(t)
       , dx_(dx)
       , dmu_(dmu)
@@ -614,8 +605,8 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
 
     Body_rosenbrock(Body_rosenbrock& other, tbb::split /*split*/)
       : partitioning_(other.partitioning_)
-      , u_n_(other.u_n_)
-      , u_update_(other.u_update_)
+      , psi_(other.psi_)
+      , psi_update_(other.psi_update_)
       , t_(other.t_)
       , dx_(other.dx_)
       , dmu_(other.dmu_)
@@ -628,7 +619,7 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
       // for all partitions in tbb-range
       for(std::size_t p = range.begin(); p != range.end(); ++p) {
         auto partition = partitioning_.partition(p);
-        walk_grid_parallel_rosenbrock(partition, u_n_, u_update_, t_, dx_, dmu_, jacobian_, stage_);
+        walk_grid_parallel_rosenbrock< decltype(partition), DiscreteFunctionType, ProblemType >(partition, psi_, psi_update_, t_, dx_, dmu_, jacobian_, stage_);
       }
     }
 
@@ -636,8 +627,8 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
     {}
 
   PartitioningType& partitioning_;
-  const DiscreteFunctionType& u_n_;
-  DiscreteFunctionType& u_update_;
+  const DiscreteFunctionType& psi_;
+  DiscreteFunctionType& psi_update_;
   const double t_;
   const double dx_;
   const double dmu_;
@@ -648,8 +639,8 @@ void walk_grid_parallel_rosenbrock(const EntityRange& entity_range,
 
 
 template <class DiscreteFunctionType>
-void apply_finite_difference(const DiscreteFunctionType& u_n,
-                             DiscreteFunctionType& u_update,
+void apply_finite_difference(const DiscreteFunctionType& psi,
+                             DiscreteFunctionType& psi_update,
                              const double t,
                              const double dx,
                              const double dmu)
@@ -658,11 +649,11 @@ void apply_finite_difference(const DiscreteFunctionType& u_n,
 #if DUNE_VERSION_NEWER(DUNE_COMMON,3,9) && HAVE_TBB //EXADUNE
     static const auto num_partitions = DSC_CONFIG_GET("threading.partition_factor", 1u)
                                 * DS::threadManager().current_threads();
-    static const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(u_n.space().grid_view(), num_partitions);
+    static const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(psi.space().grid_view(), num_partitions);
     static tbb::blocked_range< std::size_t > blocked_range(0, partitioning->partitions());
     Body< Dune::RangedPartitioning< GridViewType, 0 >, DiscreteFunctionType > body(*partitioning,
-                                                                                   u_n,
-                                                                                   u_update,
+                                                                                   psi,
+                                                                                   psi_update,
                                                                                    t,
                                                                                    dx,
                                                                                    dmu);
@@ -670,9 +661,9 @@ void apply_finite_difference(const DiscreteFunctionType& u_n,
 #endif
 }
 
-template <class DiscreteFunctionType>
-void apply_finite_difference_rosenbrock(const DiscreteFunctionType& u_n,
-                                        DiscreteFunctionType& u_update,
+template <class DiscreteFunctionType, class ProblemType >
+void apply_finite_difference_rosenbrock(const DiscreteFunctionType& psi,
+                                        DiscreteFunctionType& psi_update,
                                         const double t,
                                         const double dx,
                                         const double dmu,
@@ -683,11 +674,11 @@ void apply_finite_difference_rosenbrock(const DiscreteFunctionType& u_n,
 #if DUNE_VERSION_NEWER(DUNE_COMMON,3,9) && HAVE_TBB //EXADUNE
     const auto num_partitions = DSC_CONFIG_GET("threading.partition_factor", 1u)
                                 * DS::threadManager().current_threads();
-    const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(u_n.space().grid_view(), num_partitions);
+    const auto partitioning = DSC::make_unique< Dune::RangedPartitioning< GridViewType, 0 > >(psi.space().grid_view(), num_partitions);
     tbb::blocked_range< std::size_t > blocked_range(0, partitioning->partitions());
-    Body_rosenbrock< Dune::RangedPartitioning< GridViewType, 0 >, DiscreteFunctionType > body(*partitioning,
-                                                                                              u_n,
-                                                                                              u_update,
+    Body_rosenbrock< Dune::RangedPartitioning< GridViewType, 0 >, DiscreteFunctionType, ProblemType > body(*partitioning,
+                                                                                              psi,
+                                                                                              psi_update,
                                                                                               t,
                                                                                               dx,
                                                                                               dmu,
@@ -698,11 +689,14 @@ void apply_finite_difference_rosenbrock(const DiscreteFunctionType& u_n,
 }
 
 template< class DiscreteFunctionType >
-auto create_first_last_stage(const DiscreteFunctionType& u_n, const double t, const double dx, const double dmu) -> DiscreteFunctionType
+DiscreteFunctionType create_first_last_stage(const DiscreteFunctionType& psi,
+                                             const double t,
+                                             const double dx,
+                                             const double dmu)
 {
-  DiscreteFunctionType last_stage_of_last_step = u_n;
+  DiscreteFunctionType last_stage_of_last_step = psi;
   last_stage_of_last_step.vector() *= 0.0;
-  apply_finite_difference(u_n, last_stage_of_last_step, t, dx, dmu);
+  apply_finite_difference(psi, last_stage_of_last_step, t, dx, dmu);
   return last_stage_of_last_step;
 }
 
@@ -711,46 +705,46 @@ double step(double& t,
             const double initial_dt,
             const double dx,
             const double dmu,
-            DiscreteFunctionType& u_n,
+            DiscreteFunctionType& psi_n,
             Dune::DynamicMatrix< double >& A,
             Dune::DynamicVector< double >& b_1,
             Dune::DynamicVector< double >& b_2,
             Dune::DynamicVector< double >& c,
             const double TOL = 0.0001)
 {
-    static DiscreteFunctionType last_stage_of_last_step =  create_first_last_stage(u_n, t, dx, dmu);
+    static DiscreteFunctionType last_stage_of_last_step =  create_first_last_stage(psi_n, t, dx, dmu);
     static const auto num_stages = A.rows();
-    static std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, last_stage_of_last_step);
+    static std::vector< DiscreteFunctionType > psi_intermediate_stages(num_stages, last_stage_of_last_step);
     static const auto b_diff = b_2 - b_1;
-    static auto u_n_tmp = u_n;
+    static auto psi_n_tmp = psi_n;
     double mixed_error = 10.0;
     double dt = initial_dt;
     static double scale_max = 6;
     double scale_factor = 1.0;
-    static auto diff_vector = u_n.vector();
+    static auto diff_vector = psi_n.vector();
     static auto diff_vector_size = diff_vector.size();
 
-    auto& u_n_vector = u_n.vector();
+    auto& psi_n_vector = psi_n.vector();
 
     while (mixed_error > TOL) {
       dt *= scale_factor;
 
-      u_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
+      psi_intermediate_stages[0].vector() = last_stage_of_last_step.vector();
       for (size_t ii = 1; ii < num_stages; ++ii) {
-//        std::fill(u_intermediate_stages[ii].vector().begin(), u_intermediate_stages[ii].vector().end(), 0.0);
-        u_n_tmp.vector() = u_n_vector;
+//        std::fill(psi_intermediate_stages[ii].vector().begin(), psi_intermediate_stages[ii].vector().end(), 0.0);
+        psi_n_tmp.vector() = psi_n_vector;
         for (size_t jj = 0; jj < ii; ++jj)
-          u_n_tmp.vector().axpy(dt*(A[ii][jj]), u_intermediate_stages[jj].vector());
-        apply_finite_difference(u_n_tmp, u_intermediate_stages[ii], t+c[ii]*dt, dx, dmu);
+          psi_n_tmp.vector().axpy(dt*(A[ii][jj]), psi_intermediate_stages[jj].vector());
+        apply_finite_difference(psi_n_tmp, psi_intermediate_stages[ii], t+c[ii]*dt, dx, dmu);
       }
 
-      diff_vector = u_intermediate_stages[0].vector()*b_diff[0];
+      diff_vector = psi_intermediate_stages[0].vector()*b_diff[0];
       for (size_t ii = 1; ii < num_stages; ++ii)
-        diff_vector.axpy(b_diff[ii], u_intermediate_stages[ii].vector());
+        diff_vector.axpy(b_diff[ii], psi_intermediate_stages[ii].vector());
       diff_vector *= dt;
-      // scaling, use absolute error if norm is less than 0.01, maybe should use u_nplus1 instead of u_n for relative error
+      // scaling, use absolute error if norm is less than 0.01, maybe should use psi_nplus1 instead of psi_n for relative error
       for (size_t ii = 0; ii < diff_vector_size; ++ii)
-        diff_vector[ii] *= std::abs(u_n_vector[ii]) > 0.01 ? std::abs(u_n_vector[ii]) : 1.0;
+        diff_vector[ii] *= std::abs(psi_n_vector[ii]) > 0.01 ? std::abs(psi_n_vector[ii]) : 1.0;
       mixed_error = diff_vector.sup_norm();
 //      std::cout << mixed_error << std::endl;
       scale_factor = std::min(std::max(0.9*std::pow(TOL/mixed_error, 1.0/5.0), 0.2), scale_max);
@@ -758,10 +752,10 @@ double step(double& t,
     }
 
     for (size_t ii = 0; ii < num_stages; ++ii) {
-      u_n_vector.axpy(dt*b_1[ii], u_intermediate_stages[ii].vector());
+      psi_n_vector.axpy(dt*b_1[ii], psi_intermediate_stages[ii].vector());
     }
 
-    last_stage_of_last_step.vector() = u_intermediate_stages[num_stages - 1].vector();
+    last_stage_of_last_step.vector() = psi_intermediate_stages[num_stages - 1].vector();
 
     t += dt;
 
@@ -770,11 +764,11 @@ double step(double& t,
     return dt*scale_factor;
 }
 
-template< class DiscreteFunctionType >
+template< class DiscreteFunctionType, class ProblemType >
 double step_rosenbrock(double& t,
                        const double initial_dt,
                        const double dx, const double dmu,
-                       DiscreteFunctionType& u_n,
+                       DiscreteFunctionType& psi_n,
                        Dune::DynamicMatrix< double >& A_new,
                        Dune::DynamicVector< double >& m_1,
                        Dune::DynamicVector< double >& m_2,
@@ -790,26 +784,26 @@ double step_rosenbrock(double& t,
   static std::unique_ptr< SolverType > solver = DSC::make_unique< SolverType >(system_matrix);
 
   static const auto num_stages = A_new.rows();
-  thread_local static std::vector< DiscreteFunctionType > u_intermediate_stages(num_stages, u_n);
+  thread_local static std::vector< DiscreteFunctionType > psi_intermediate_stages(num_stages, psi_n);
   static const auto m_diff = m_2 - m_1;
-  static auto u_n_tmp = u_n;
-  static auto k_i_tmp = u_n;
-  static auto k_sum = u_n;
+  static auto psi_n_tmp = psi_n;
+  static auto k_i_tmp = psi_n;
+  static auto k_sum = psi_n;
   double mixed_error = 10.0;
   double dt = initial_dt;
   static double scale_max = 6;
   double scale_factor = 1.0;
-  static auto diff_vector = u_n.vector();
+  static auto diff_vector = psi_n.vector();
   static auto diff_vector_size = diff_vector.size();
 
   while (mixed_error > TOL) {
     dt *= scale_factor;
 
     for (size_t ii = 0; ii < num_stages; ++ii) {
-      u_n_tmp.vector() = u_n.vector();
+      psi_n_tmp.vector() = psi_n.vector();
       for (size_t jj = 0; jj < ii; ++jj)
-        u_n_tmp.vector().axpy(A_new[ii][jj], u_intermediate_stages[jj].vector());
-      apply_finite_difference_rosenbrock(u_n_tmp, k_i_tmp, t+c[ii]*dt, dx, dmu, negative_jacobian, ii);
+        psi_n_tmp.vector().axpy(A_new[ii][jj], psi_intermediate_stages[jj].vector());
+      apply_finite_difference_rosenbrock< DiscreteFunctionType, ProblemType >(psi_n_tmp, k_i_tmp, t+c[ii]*dt, dx, dmu, negative_jacobian, ii);
       // as C_ii is the same for all i, we only need to calculate the matrix in the first step
       if (ii == 0) {
         // create solver
@@ -822,26 +816,26 @@ double step_rosenbrock(double& t,
       // ...
       //
       for (size_t jj = 0; jj < ii; ++jj)
-        k_i_tmp.vector().axpy(C[ii][jj]/dt, u_intermediate_stages[jj].vector());
+        k_i_tmp.vector().axpy(C[ii][jj]/dt, psi_intermediate_stages[jj].vector());
       // solve
-      solver->apply(k_i_tmp.vector(), u_intermediate_stages[ii].vector());
+      solver->apply(k_i_tmp.vector(), psi_intermediate_stages[ii].vector());
     }
 
     // calculate error
-    diff_vector = u_intermediate_stages[0].vector()*m_diff[0];
+    diff_vector = psi_intermediate_stages[0].vector()*m_diff[0];
     for (size_t ii = 1; ii < num_stages; ++ii) {
-      diff_vector.axpy(m_diff[ii], u_intermediate_stages[ii].vector());
+      diff_vector.axpy(m_diff[ii], psi_intermediate_stages[ii].vector());
     }
-    // scaling, use absolute error if norm is less than 0.01, maybe should use u_nplus1 instead of u_n for relative error
+    // scaling, use absolute error if norm is less than 0.01, maybe should use psi_nplus1 instead of psi_n for relative error
     for (size_t ii = 0; ii < diff_vector_size; ++ii)
-      diff_vector[ii] *= std::abs(u_n.vector()[ii]) > 0.01 ? std::abs(u_n.vector()[ii]) : 1.0;
+      diff_vector[ii] *= std::abs(psi_n.vector()[ii]) > 0.01 ? std::abs(psi_n.vector()[ii]) : 1.0;
     mixed_error = diff_vector.sup_norm();
 //    std::cout << rel_error << std::endl;
     scale_factor = std::min(std::max(0.9*std::pow(TOL/mixed_error, 1.0/5.0), 0.2), scale_max);
   }
 
   for (size_t ii = 0; ii < num_stages; ++ii) {
-    u_n.vector().axpy(m_1[ii], u_intermediate_stages[ii].vector());
+    psi_n.vector().axpy(m_1[ii], psi_intermediate_stages[ii].vector());
   }
 
   t += dt;
@@ -889,7 +883,7 @@ void integrate_over_mu(const FDDiscreteFunction& psi, IntegratedDiscretFunctionT
 
 
 template <class DiscreteFunctionType, class XFVSpaceType>
-void solve(DiscreteFunctionType& u_n,
+void solve(DiscreteFunctionType& psi_n,
            const double t_end,
            const double first_dt,
            const double dx,
@@ -922,31 +916,31 @@ void solve(DiscreteFunctionType& u_n,
   // clear solution
   if (save_solution) {
     solution.clear();
-    solution.emplace_back(std::make_pair(t_, u_n));
+    solution.emplace_back(std::make_pair(t_, psi_n));
   }
   if (write_solution) {
-//    u_n.visualize(filename_prefix + "_0");
-    XFVFunctionType u_integrated(x_fvspace, "x_solution");
-    integrate_over_mu(u_n, u_integrated, dmu);
-    u_integrated.visualize(filename_prefix + "_0");
-    write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv", false);
+//    psi_n.visualize(filename_prefix + "_0");
+    XFVFunctionType psi_integrated(x_fvspace, "x_solution");
+    integrate_over_mu(psi_n, psi_integrated, dmu);
+    psi_integrated.visualize(filename_prefix + "_0");
+    write_step_to_csv(x_grid_view, t_, psi_integrated, filename_prefix + ".csv", false);
   }
 
   while (t_ + dt < t_end)
   {
     // do a timestep
-    dt = step(t_, dt, dx, dmu, u_n, A, b_1, b_2, c, TOL);
+    dt = step(t_, dt, dx, dmu, psi_n, A, b_1, b_2, c, TOL);
 
     // check if data should be written in this timestep (and write)
     if (DSC::FloatCmp::ge(t_, next_save_time - 1e-10)) {
       if (save_solution)
-        solution.emplace_back(std::make_pair(t_, u_n));
+        solution.emplace_back(std::make_pair(t_, psi_n));
       if (write_solution) {
-//        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        XFVFunctionType u_integrated(x_fvspace, "x_solution");
-        integrate_over_mu(u_n, u_integrated, dmu);
-        u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv");
+//        psi_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+        XFVFunctionType psi_integrated(x_fvspace, "x_solution");
+        integrate_over_mu(psi_n, psi_integrated, dmu);
+        psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+        write_step_to_csv(x_grid_view, t_, psi_integrated, filename_prefix + ".csv");
         std::cout << t_ << " and dt " << dt << std::endl;
       }
       next_save_time += save_interval;
@@ -959,25 +953,25 @@ void solve(DiscreteFunctionType& u_n,
 
   // do last step s.t. it matches t_end exactly
   if (!DSC::FloatCmp::ge(t_, t_end - 1e-10)) {
-    step(t_, t_end - t_, dx, dmu, u_n, A, b_1, b_2, c, TOL);
+    step(t_, t_end - t_, dx, dmu, psi_n, A, b_1, b_2, c, TOL);
     if (save_solution)
-      solution.emplace_back(std::make_pair(t_, u_n));
+      solution.emplace_back(std::make_pair(t_, psi_n));
     if (write_solution) {
-//        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      XFVFunctionType u_integrated(x_fvspace, "x_solution");
-      integrate_over_mu(u_n, u_integrated, dmu);
-      u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      write_step_to_csv(x_grid_view, t_, u_integrated, filename_prefix + ".csv");
+//        psi_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      XFVFunctionType psi_integrated(x_fvspace, "x_solution");
+      integrate_over_mu(psi_n, psi_integrated, dmu);
+      psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      write_step_to_csv(x_grid_view, t_, psi_integrated, filename_prefix + ".csv");
       std::cout << t_ << " and dt " << dt << std::endl;
     }
   }
 } // ... solve(...)
 
 template< class DiscreteFunctionType >
-Dune::Stuff::LA::SparsityPatternDefault assemble_pattern(DiscreteFunctionType& u_n)
+Dune::Stuff::LA::SparsityPatternDefault assemble_pattern(DiscreteFunctionType& psi_n)
 {
-  const auto& mapper = u_n.space().mapper();
-  const auto& grid_view = u_n.space().grid_view();
+  const auto& mapper = psi_n.space().mapper();
+  const auto& grid_view = psi_n.space().grid_view();
   typedef typename DiscreteFunctionType::SpaceType::GridViewType::IndexSet::IndexType IndexType;
   IndexType left_index, right_index, top_index, bottom_index, entity_index;
   const auto num_grid_elements = grid_view.size(0);
@@ -1040,8 +1034,8 @@ Dune::Stuff::LA::SparsityPatternDefault assemble_pattern(DiscreteFunctionType& u
 
 
 
-template <class DiscreteFunctionType, class XFVSpaceType>
-void solve_rosenbrock(DiscreteFunctionType& u_n,
+template <class DiscreteFunctionType, class XFVSpaceType, class ProblemType >
+void solve_rosenbrock(DiscreteFunctionType& psi_n,
                       const double t_end,
                       const double first_dt,
                       const double dx,
@@ -1076,20 +1070,20 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
   // clear solution
   if (save_solution) {
     solution.clear();
-    solution.emplace_back(std::make_pair(t_, u_n));
+    solution.emplace_back(std::make_pair(t_, psi_n));
   }
 
   if (write_solution) {
-//    u_n.visualize(filename_prefix + "_0");
-    XFVFunctionType u_integrated(x_fvspace, "x_solution");
-    integrate_over_mu(u_n, u_integrated, dmu);
-    u_integrated.visualize(filename_prefix + "_0");
-    write_step_to_csv(t_, u_integrated, filename_prefix + ".csv", false);
+//    psi_n.visualize(filename_prefix + "_0");
+    XFVFunctionType psi_integrated(x_fvspace, "x_solution");
+    integrate_over_mu(psi_n, psi_integrated, dmu);
+    psi_integrated.visualize(filename_prefix + "_0");
+    write_step_to_csv(t_, psi_integrated, filename_prefix + ".csv", false);
   }
 
-  const auto pattern = assemble_pattern(u_n);
+  const auto pattern = assemble_pattern(psi_n);
 
-  const auto num_grid_elements = u_n.space().grid_view().size(0);
+  const auto num_grid_elements = psi_n.space().grid_view().size(0);
 
   DS::LA::EigenRowMajorSparseMatrix< double > jacobian(num_grid_elements, num_grid_elements, pattern);
   DS::LA::EigenRowMajorSparseMatrix< double > system_matrix(num_grid_elements, num_grid_elements, pattern);
@@ -1116,18 +1110,18 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
   while (t_ + dt < t_end)
   {
     // do a timestep
-    dt = step_rosenbrock(t_, dt, dx, dmu, u_n, A, m_1, m_2, c, d, C, gamma, jacobian, system_matrix, TOL);
+    dt = step_rosenbrock< DiscreteFunctionType, ProblemType >(t_, dt, dx, dmu, psi_n, A, m_1, m_2, c, d, C, gamma, jacobian, system_matrix, TOL);
 
     // check if data should be written in this timestep (and write)
     if (DSC::FloatCmp::ge(t_, next_save_time - 1e-10)) {
       if (save_solution)
-        solution.emplace_back(std::make_pair(t_, u_n));
+        solution.emplace_back(std::make_pair(t_, psi_n));
       if (write_solution) {
-//        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        XFVFunctionType u_integrated(x_fvspace, "x_solution");
-        integrate_over_mu(u_n, u_integrated, dmu);
-        u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        write_step_to_csv(t_, u_integrated, filename_prefix + ".csv");
+//        psi_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+        XFVFunctionType psi_integrated(x_fvspace, "x_solution");
+        integrate_over_mu(psi_n, psi_integrated, dmu);
+        psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+        write_step_to_csv(t_, psi_integrated, filename_prefix + ".csv");
       }
       next_save_time += save_interval;
       ++save_step_counter;
@@ -1139,20 +1133,21 @@ void solve_rosenbrock(DiscreteFunctionType& u_n,
 
   // do last step s.t. it matches t_end exactly
   if (!DSC::FloatCmp::ge(t_, t_end - 1e-10)) {
+    step_rosenbrock< DiscreteFunctionType, ProblemType >(t_, dt, dx, dmu, psi_n, A, m_1, m_2, c, d, C, gamma, jacobian, system_matrix, TOL);
     if (save_solution)
-      solution.emplace_back(std::make_pair(t_, u_n));
+      solution.emplace_back(std::make_pair(t_, psi_n));
     if (write_solution) {
-      //        u_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      XFVFunctionType u_integrated(x_fvspace, "x_solution");
-      integrate_over_mu(u_n, u_integrated, dmu);
-      u_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      write_step_to_csv(t_, u_integrated, filename_prefix + ".csv");
+      //        psi_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      XFVFunctionType psi_integrated(x_fvspace, "x_solution");
+      integrate_over_mu(psi_n, psi_integrated, dmu);
+      psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+      write_step_to_csv(t_, psi_integrated, filename_prefix + ".csv");
     }
   }
 } // ... solve_rosenbrock(...)
 
 /**
- * main function. Choose problem (TwoBeams or SoureBeam) by uncommenting the right ProblemType.
+ * main function. Choose problem (TwoBeams or SoureBeam) by uncommenting the right TestCase.
  */
 int main(int argc, char* argv[])
 {
@@ -1242,11 +1237,9 @@ int main(int argc, char* argv[])
     typedef typename GridType2D::Codim< 0 >::Entity EntityType2D;
 
     // choose ProblemType
-//    typedef TwoBeams<EntityType2D> ProblemType;
-    typedef SourceBeam<EntityType2D> ProblemType;
-
-    // create Problem
-    const ProblemType problem;
+    const TestCase test_case = TestCase::SourceBeam;
+//    const TestCase test_case = TestCase::TwoBeams;
+    typedef Problem< EntityType2D, test_case > ProblemType;
 
     //get grid configuration from problem and set the number of elements
     Dune::Stuff::Common::Configuration grid_config = ProblemType::default_grid_config();
@@ -1277,7 +1270,7 @@ int main(int argc, char* argv[])
     DiscreteFunctionType2D psi(fv_space_2d, "solution");
 
     //project initial values
-    const auto initial_values = problem.initial_values();
+    const auto initial_values = ProblemType::initial_values();
     std::cout << "Projecting initial values..." << std::endl;
     project(initial_values, psi);
 
@@ -1408,24 +1401,24 @@ int main(int argc, char* argv[])
 //          TOL);
 
 
-    solve_rosenbrock(psi,
-                     t_end,
-                     dt,
-                     dx,
-                     dmu,
-                     saveInterval,
-                     false,
-                     true,
-                     filename,
-                     solution,
-                     A,
-                     b_1,
-                     b_2,
-                     c,
-                     d,
-                     Gamma,
-                     fv_space_1d,
-                     TOL);
+    solve_rosenbrock< DiscreteFunctionType2D, FVSpaceType1D, ProblemType >(psi,
+                                                                           t_end,
+                                                                           dt,
+                                                                           dx,
+                                                                           dmu,
+                                                                           saveInterval,
+                                                                           false,
+                                                                           true,
+                                                                           filename,
+                                                                           solution,
+                                                                           A,
+                                                                           b_1,
+                                                                           b_2,
+                                                                           c,
+                                                                           d,
+                                                                           Gamma,
+                                                                           fv_space_1d,
+                                                                           TOL);
 
     DSC_PROFILER.stopTiming("fd.solve");
 
