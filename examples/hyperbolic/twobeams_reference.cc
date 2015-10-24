@@ -1332,7 +1332,7 @@ void solve(DiscreteFunctionType& psi_n,
     }
   }
 
-  while (t_ + dt < t_end)
+  while (t_ < t_end)
   {
     if (DSC::FloatCmp::ge(t_ + dt, next_save_time - 1e-10))
       dt = next_save_time - t_;
@@ -1362,24 +1362,6 @@ void solve(DiscreteFunctionType& psi_n,
     // augment time step counter
     ++time_step_counter;
   } // while (t_ < t_end)
-
-  // do last step s.t. it matches t_end exactly
-  if (!DSC::FloatCmp::ge(t_, t_end - 1e-10)) {
-    dt = ChooseStep<is_rosenbrock_type>::template step< DiscreteFunctionType, ProblemType >(t_, dt, dx, dmu,
-                                                                                            psi_n,
-                                                                                            A, b_1, b_2, c, d, C, gamma,
-                                                                                            jacobian, system_matrix,
-                                                                                            TOL);
-    if (save_solution)
-      solution.emplace_back(std::make_pair(t_, psi_n));
-    if (write_solution) {
-      //        psi_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      DiscreteFunctionType1D psi_integrated(fv_space_1d, "x_solution");
-      integrate_over_mu(psi_n, psi_integrated, dmu);
-      psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-      write_step_to_csv(t_, psi_integrated, filename_prefix);
-    }
-  }
 } // ... solve(...)
 
 /**
