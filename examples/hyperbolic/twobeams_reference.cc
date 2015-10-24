@@ -904,7 +904,9 @@ double step_rk(double& t,
       // need to make a deep copy here (by using backend()). If no deep copy is done, the vectors of
       // last_stage_of_previous_step, psi_intermediate_stages[0] and psi_intermediate_stages[num_stages-1] all point to
       // the same vector (because of the copy on write). This seems to cause strange memory corruption errors when using
-      // multiple threads. TODO: Investigate why this is and why a deep copy here apparently fixes it.
+      // multiple threads. TODO: Investigate why this is and why a deep copy here apparently fixes it. Update: Does not
+      // fix it, just improves the situation. Time step length are still different when multiple threads are used so
+      // something is still wrong.
       psi_intermediate_stages[0].vector() = last_stage_of_previous_step.vector().backend();
       for (size_t ii = 1; ii < num_stages; ++ii) {
         psi_n_tmp.vector() = psi_n_vector;
