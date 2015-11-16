@@ -1398,7 +1398,6 @@ int main(int argc, char* argv[])
       if (std::string(argv[i]) == "-threading.max_count") {
         if (i + 1 < argc) { // Make sure we aren't at the end of argv!
           num_threads = DSC::fromString< size_t >(argv[i+1]); // Increment 'i' so we don't get the argument as the next argv[i].
-          DS::threadManager().set_max_threads(num_threads);
         } else {
           std::cerr << "-threading.max_count option requires one argument." << std::endl;
           return 1;
@@ -1448,6 +1447,7 @@ int main(int argc, char* argv[])
       } else
         std::cerr << "Unrecognized option " << argv[i] << "has been ignored." << std::endl;
     }
+    DS::threadManager().set_max_threads(num_threads);
 
     // set dimensions
     static const size_t dimDomain = 1;
