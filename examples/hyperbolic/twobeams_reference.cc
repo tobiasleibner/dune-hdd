@@ -1237,7 +1237,8 @@ Dune::Stuff::LA::SparsityPatternDefault assemble_pattern(DiscreteFunctionType& p
  * @param save_step_length specifies at which interval the solution is stored/written. If for example save_step_length
  * = 0.1, the solution will be saved at times 0, 0.1, 0.2, 0.3, ...
  * @param save_solution if true, the solution is stored (at the time steps specified by save_step_length) in solution
- * @param write_solution if true, the solution is written to vtp and csv files at the specified time steps
+ * @param write_solution_csv if true, the solution is written to csv files at the specified time steps
+ * @param write_solution_vtp if true, the solution is written to vtp files at the specified time steps
  * @param TOL tolerance for the error in each step of the embedded timestepping schemes
  */
 template <class DiscreteFunctionType, class FVSpaceType1D, class ProblemType, ChooseTimeStepper timestepper >
@@ -1248,7 +1249,8 @@ void solve(DiscreteFunctionType& psi_n,
            const double dmu,
            const double save_step_length,
            const bool save_solution,
-           const bool write_solution,
+           const bool write_solution_vtp,
+           const bool write_solution_csv,
            const std::string filename_prefix,
            std::vector< std::pair< double, DiscreteFunctionType > >& solution,
            const FVSpaceType1D& fv_space_1d,
@@ -1273,13 +1275,18 @@ void solve(DiscreteFunctionType& psi_n,
   }
 
   // write initial values to .vtu/.vtp and .csv files
-  if (write_solution) {
-//    psi_n.visualize(filename_prefix + "_0");
-    DiscreteFunctionType1D psi_integrated(fv_space_1d, "integrated solution");
-    integrate_over_mu(psi_n, psi_integrated, dmu);
-    psi_integrated.visualize(filename_prefix + "_0");
-    write_step_to_csv(t_, psi_integrated, filename_prefix, false);
+  if (write_solution_vtp || write_solution_csv) {
+    //    psi_n.visualize(filename_prefix + "_0");
+        DiscreteFunctionType1D psi_integrated(fv_space_1d, "integrated solution");
+        integrate_over_mu(psi_n, psi_integrated, dmu);
+    if (write_solution_vtp) {
+        psi_integrated.visualize(filename_prefix + "_0");
+    }
+    if (write_solution_csv) {
+        write_step_to_csv(t_, psi_integrated, filename_prefix, false);
+    }
   }
+
 
   // pattern for jacobian J and system_matrix (1/(dt*gamma)*I - J), notation as in
   // Hairer, Wanner (1996), Solving ordinary differential equations II: Stiff and differential-algebraic problems,
@@ -1347,13 +1354,17 @@ void solve(DiscreteFunctionType& psi_n,
     if (DSC::FloatCmp::ge(t_, next_save_time - 1e-10)) {
       if (save_solution)
         solution.emplace_back(std::make_pair(t_, psi_n));
-      if (write_solution) {
+      if (write_solution_csv || write_solution_vtp) {
         std::cout << t_ << " and dt " << dt << std::endl;
 //        psi_n.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
         DiscreteFunctionType1D psi_integrated(fv_space_1d, "integrated solution");
         integrate_over_mu(psi_n, psi_integrated, dmu);
-        psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
-        write_step_to_csv(t_, psi_integrated, filename_prefix);
+        if (write_solution_csv){
+            write_step_to_csv(t_, psi_integrated, filename_prefix);
+        }
+        if (write_solution_vtp){
+            psi_integrated.visualize(filename_prefix + "_" + DSC::toString(save_step_counter));
+        }
       }
       next_save_time += save_interval;
       ++save_step_counter;
@@ -1527,7 +1538,8 @@ int main(int argc, char* argv[])
                                                                              dmu,
                                                                              saveInterval,
                                                                              false,
-                                                                             true,
+                                                                             false, // save vtp
+                                                                             true, // save csv
                                                                              filename,
                                                                              solution,
                                                                              fv_space_1d,
